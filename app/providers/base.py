@@ -1,87 +1,58 @@
-"""Provider adapters and the factory that selects one.
+"""Provider adapter interface and notes on how real services plug in.
 
-The app depends on the ``Provider`` protocol only. The demo provider is the
-default (deterministic, credential-free, fully testable). Real LLM, search, and
-Qloo adapters can be added behind the same seam by implementing this protocol
-and mapping ``VL_PROVIDER`` to the chosen adapter (see app/config.py).
+The app depends on the ``Provider`` interface only. The demo provider is the
+default (deterministic, credential-free, fully testable).
+
+Mapping to the requested pipeline:
+- ``first_question`` / ``next_question`` emulate the "grilling" skill: they
+  dynamically produce a question and shortlisted answer options derived from
+  the user's prompt and prior answers. A real deployment implements this as an
+  LLM call that respects the provider seam and session/global budgets.
+- ``write_report`` emulates the model step that consumes the collected answers
+  and returns a report. The user's reference calls this "Qloo LLM"; in practice
+  Qloo is a taste/data API and the reasoning model is the configured LLM, so a
+  real adapter composes both. The demo provider stands in until credentials are
+  wired through ``VL_PROVIDER``.
 """
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import List, Optional
 
-from app.model import (
-    BusinessProfile,
-    CityCandidate,
-    FollowupTurn,
-    NeighborhoodComparison,
-    Plan,
-)
+from app.model import BusinessProfile, GrillQuestion, GrillTurn, Report
 
 
 class Provider:
-    """The seam between the application and external research/synthesis services.
-
-    Real adapters implement these methods; the demo provider ships a
-    deterministic implementation. Methods that perform live research should
-    respect the configured timeouts and be wrapped so the session/global query
-    budgets are charged at the call site.
-    """
-
     name: str = "base"
 
-    def extract_opening(self, text: str) -> Dict[str, str]:
-        """Best-effort extraction from the user's opening prompt into a profile.
+    def extract_opening(self, text: str) -> BusinessProfile:
+        """Best-effort parse of the opening prompt into a profile."""
+        raise NotImplementedError
 
-        Returns a dict of profile fields (e.g. idea, region, budget) that the
-        interview may pre-fill. Never invents facts not stated.
+    def first_question(
+        self,
+        profile: BusinessProfile,
+        opening: str,
+    ) -> GrillQuestion:
+        """Return the first grilling question for this prompt."""
+        raise NotImplementedError
+
+    def next_question(
+        self,
+        profile: BusinessProfile,
+        transcript: List[GrillTurn],
+    ) -> Optional[GrillQuestion]:
+        """Return the next grilling question, or None when grilling is done.
+
+        Each returned question may depend on the opening prompt and prior
+        answers, mirroring the grilling skill's dynamic questioning.
         """
         raise NotImplementedError
 
-    def region_valid(self, region: str) -> bool:
-        """Return True when ``region`` is a usable U.S. state or region for discovery."""
-        raise NotImplementedError
-
-    def discover_cities(
+    def write_report(
         self,
         profile: BusinessProfile,
-        offset: int = 0,
-        excludes: Optional[List[str]] = None,
-    ) -> List[CityCandidate]:
-        """Return the next batch of ranked candidate cities for the region."""
+        transcript: List[GrillTurn],
+    ) -> Report:
+        """Consume the collected answers and return the report."""
         raise NotImplementedError
-
-    def city_in_region(self, city: str, profile: BusinessProfile) -> bool:
-        """Return True when a manually entered city is inside the selected region."""
-        raise NotImplementedError
-
-    def analyze_neighborhoods(
-        self,
-        profile: BusinessProfile,
-        city: str,
-        category: str,
-    ) -> NeighborhoodComparison:
-        """Discover and score 5-10 neighborhoods in ``city``."""
-        raise NotImplementedError
-
-    def synthesize_plan(self, session) -> Plan:
-        """Assemble the structured plan from the session's profile and comparison."""
-        raise NotImplementedError
-
-    def answer_followup(
-        self,
-        session,
-        question: str,
-        context_citations: Optional[List] = None,
-    ) -> FollowupTurn:
-        """Answer a follow-up question; may perform new research when needed."""
-        raise NotImplementedError
-
-    def analyze_neighborhoods_v1(
-        self,
-        profile: BusinessProfile,
-        city: str,
-        category: str,
-    ) -> NeighborhoodComparison:
-        # Alias retained for explicit seam clarity.
-        return self.analyze_neighborhoods(profile, city, category)

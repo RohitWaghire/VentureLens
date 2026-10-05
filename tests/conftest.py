@@ -1,7 +1,8 @@
 """Shared pytest fixtures.
 
-The app is instantiated per-test with relaxed safety limits so the full user
-flow can run deterministically with the demo provider (no credentials needed).
+The app is instantiated per-test with relaxed safety limits so the full
+grilling pipeline runs deterministically with the demo provider (no credentials
+needed).
 """
 
 from __future__ import annotations
@@ -49,15 +50,27 @@ def csrf_for(client, path: str = "/") -> str:
     return match.group(1)
 
 
+def answer_grill(client, csrf: str, qid: str, qtext: str, answer: str):
+    client.post(
+        "/grill",
+        data={"csrf": csrf, "qid": qid, "qtext": qtext, "answer": answer},
+    )
+
+
 @pytest.fixture
 def flow(client):
-    """A session driven to the plan page via the demo provider."""
-    csrf = csrf_for(client)  # create session + cookie
+    """A session driven through two grill answers to the report page."""
+    client.get("/")  # create session + cookie
+    csrf = csrf_for(client)
     client.post(
-        "/summary",
-        data={"idea": "specialty coffee shop", "region": "Illinois", "csrf": csrf},
+        "/start",
+        data={
+            "prompt": "I have $250k and want to open a specialty coffee shop in Illinois.",
+            "csrf": csrf,
+        },
     )
-    client.get("/cities")
-    client.post("/cities", data={"action": "select", "city": "Chicago", "csrf": csrf})
-    client.get("/neighborhoods")
+    csrf = csrf_for(client)  # /start swapped to a fresh session
+    answer_grill(client, csrf, "timeline", "When would you hope to launch?", "Within 6 months")
+    answer_grill(client, csrf, "audience", "Who is your primary customer or audience?", "Young professionals")
+    client.post("/grill", data={"csrf": csrf, "finish": "1"})
     return client

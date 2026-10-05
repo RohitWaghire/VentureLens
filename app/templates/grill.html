@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Planning conversation · {{ app_name }}{% endblock %}
+{% block content %}
+  <section class="interview-shell" aria-labelledby="grill-title">
+    <div class="interview-topline">
+      <form method="post" action="/new" class="inline-form">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button type="submit" class="back-link">← <span>New idea</span></button>
+      </form>
+      <span class="session-label"><span class="session-dot" aria-hidden="true"></span> PRIVATE SESSION</span>
+    </div>
+
+    <div class="conversation" aria-live="polite" aria-relevant="additions text">
+      {% for turn in transcript %}
+        <div class="assistant-message turn">
+          <div class="assistant-mark" aria-hidden="true">V</div>
+          <div class="turn-copy"><p class="turn-question">{{ turn.question }}</p></div>
+        </div>
+        <div class="user-message">
+          <span class="user-message-label">YOU</span>
+          <p>{{ turn.answer }}</p>
+        </div>
+      {% endfor %}
+
+      <div class="assistant-message">
+        <div class="assistant-mark" aria-hidden="true">V</div>
+        <div>
+          <p class="message-byline">VENTURELENS <span>· PLANNING GUIDE</span></p>
+          <h1 id="grill-title" class="question-title">{{ question.text }}</h1>
+        </div>
+      </div>
+    </div>
+
+    {% if demo_mode %}
+      <p class="demo-note interview-demo-note">Demo flow · questions and the report are generated deterministically until a real LLM is connected.</p>
+    {% endif %}
+
+    <form class="reply-composer" method="post" action="/grill" data-loading-message="Recording your answer…">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="qid" value="{{ question.id }}">
+      <input type="hidden" name="qtext" value="{{ question.text }}">
+
+      {% if question.options %}
+        <fieldset class="option-set">
+          <legend class="sr-only">Choose an answer, or type your own.</legend>
+          {% for opt in question.options %}
+            <label class="option-chip">
+              <input type="radio" name="answer" value="{{ opt.value }}">
+              <span>{{ opt.label }}</span>
+            </label>
+          {% endfor %}
+        </fieldset>
+      {% endif %}
+
+      <label for="answer" class="sr-only">Your answer</label>
+      <textarea id="answer" name="freetext" rows="3"
+        placeholder="{{ question.free_text_hint or 'Type your answer, or pick an option above.' }}"></textarea>
+
+      <div class="reply-footer">
+        <span class="keyboard-hint">↵ <span>Continue when ready</span></span>
+        <div class="reply-actions">
+          <button type="submit" name="finish" value="1" class="skip-button">Finish &amp; get my report</button>
+          <button type="submit" class="send-button reply-send" aria-label="Continue interview">
+            <span>Continue</span><span class="send-arrow" aria-hidden="true">↗</span>
+          </button>
+        </div>
+      </div>
+    </form>
+  </section>
+{% endblock %}

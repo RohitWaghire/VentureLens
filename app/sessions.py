@@ -11,36 +11,23 @@ from __future__ import annotations
 import secrets
 import threading
 import time
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
-from app.interview import InterviewState
-from app.model import (
-    BusinessProfile,
-    CityCandidate,
-    FollowupTurn,
-    NeighborhoodComparison,
-    Plan,
-)
+from app.model import BusinessProfile, GrillTurn, Report
 
 
 class Session:
-    """Per-user conversation state for one active plan."""
+    """Per-user conversation state for one planning session."""
 
     def __init__(self, session_id: str, max_age: int) -> None:
         self.id = session_id
         self.created_at = time.time()
         self.last_activity = time.time()
         self.max_age = max_age
-        self.interview: Optional[InterviewState] = None
+        self.opening: str = ""
         self.profile: Optional[BusinessProfile] = None
-        self.category: Optional[str] = None
-        self.template_proxy_for: Optional[str] = None
-        self.cities: list[CityCandidate] = []
-        self.city_offset = 0
-        self.selected_city: Optional[str] = None
-        self.comparison: Optional[NeighborhoodComparison] = None
-        self.plan: Optional[Plan] = None
-        self.followups: list[FollowupTurn] = []
+        self.transcript: List[GrillTurn] = []
+        self.report: Optional[Report] = None
         self.query_count = 0
         self.csrf_salt = secrets.token_hex(16)  # per-session CSRF salt
 

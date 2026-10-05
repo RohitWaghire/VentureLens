@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}{{ report.title }} · {{ app_name }}{% endblock %}
+{% block content %}
+  <section class="ready-shell report-shell" aria-labelledby="report-title">
+    <div class="ready-orb-stage" aria-hidden="true">
+      <span class="orb-halo"></span>
+      <span class="orb-ring"></span>
+      <span class="ready-orb"><span class="orb-core">V</span></span>
+    </div>
+
+    <div class="ready-copy">
+      <p class="eyebrow">YOUR BRIEF IS READY</p>
+      <h1 id="report-title">{{ report.title }}</h1>
+      {% if report.summary %}<p class="ready-description">{{ report.summary }}</p>{% endif %}
+      <div class="ready-actions">
+        <a class="send-button" href="/report/download">Download (Markdown) <span class="send-arrow" aria-hidden="true">↗</span></a>
+        <form method="post" action="/new" class="inline-form">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <button type="submit" class="text-link">Start a new idea</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="report-body">
+      {% for section in report.sections %}
+        <section class="card report-section">
+          <h2>{{ section.heading }}</h2>
+          <p>{{ section.body }}</p>
+        </section>
+      {% endfor %}
+      {% if report.caveat %}<p class="demo-note">{{ report.caveat }}</p>{% endif %}
+
+      {% if transcript %}
+        <section class="card subtle">
+          <h2>Answers collected</h2>
+          <ul class="transcript-list">
+            {% for turn in transcript %}
+              <li><strong>{{ turn.question }}</strong><br>{{ turn.answer }}</li>
+            {% endfor %}
+          </ul>
+        </section>
+      {% endif %}
+    </div>
+  </section>
+{% endblock %}

@@ -2,39 +2,26 @@
 
 > **A clearer view of where to grow.**
 
-An evidence-backed small-business planning app. A founder describes a business
-idea and a U.S. region, answers a short adaptive interview, then gets three
-ranked candidate cities, a neighborhood comparison, and a downloadable business
-plan with clickable source citations inline.
+An evidence-backed small-business planning app. The user gives a natural-language
+prompt, an adaptive grilling session asks a small number of questions with
+shortlisted answer options, and the model writes a report that is presented to
+the user (and can be downloaded as Markdown).
 
-> **Status:** Hackathon MVP scaffold. The app runs end-to-end now using a
-> deterministic, credential-free **demo provider**. Real LLM / web-search /
-> Qloo adapters are wired behind a replaceable seam but are not yet configured
-> (see [Provider seam](#provider-seam)).
+> **Status:** Hackathon MVP. The grilling pipeline runs end-to-end now using a
+> deterministic, credential-free **demo provider**. A real LLM (and Qloo data)
+> is wired behind a replaceable seam but is not yet configured — see the
+> [Provider seam](#provider-seam).
 
 ## Key behaviors
 
 - **Prompt-first entry** — start with a natural-language business idea in a
-  centered composer, then continue into the guided one-question-at-a-time
-  planning interview. Example prompts can prefill the composer.
-- **Interview completion transition** — a reduced-motion-aware orb-inspired
-  animation marks profile completion and hands off to profile review; it does
-  not claim that live research has run.
-- **Adaptive interview** — one question at a time. A business idea and a U.S.
-  state/region are required; every other question may be skipped and becomes a
-  labeled assumption.
-- **City discovery** — three ranked candidate cities from the chosen region;
-  the user selects, requests alternatives, or enters a city (validated against
-  the region).
-- **Neighborhood comparison** — 5–10 neighborhoods scored on 5 factors using
-  fixed category weights (cafés and restaurants), with a shortlist of three.
-- **Scorecard honesty** — if any factor lacks evidence, the overall numeric fit
-  score is **withheld**, not estimated. Rubric anchors are versioned.
-- **Business plan + Markdown export** — audience, concept/positioning, location
-  comparison, recommendations, assumptions, risks, and next steps, with inline
-  source-title links.
-- **Follow-up chat** — may trigger new research automatically, but answers only
-  appear in chat; they never mutate the downloadable plan.
+  centered composer.
+- **Dynamic grilling** — instead of a fixed questionnaire, a question is
+  generated from the prompt and prior answers, with shortlisted answer options
+  (this mirrors the "grilling" approach). Details already stated in the prompt
+  (e.g., budget, region) are not re-asked.
+- **Report** — the collected answers are handed to the model, which writes a
+  business brief presented to the user and downloadable as Markdown.
 - **Public-demo safety** — no accounts; in-memory sessions that expire server
   side; per-IP rate limiting; per-session and global research budgets; secure
   cookies; origin/CSRF protections.
@@ -79,48 +66,48 @@ commit a real secret. Key knobs:
 
 ## Architecture
 
-- **`app/main.py`** — FastAPI app, server-rendered UI, routes, safety middleware.
-- **`app/interview.py`** — explicit interview state machine and required gates.
-- **`app/scoring.py`** — category templates, weights, versioned 1–5 rubric
-  anchors, weighted-total arithmetic, ordering rule.
+- **`app/main.py`** — FastAPI app, server-rendered UI, and the grilling/report
+  routes (`/`, `/start`, `/grill`, `/report`, `/report/download`, `/new`,
+  `/close`).
+- **`app/providers/`** — the adapter seam (`base.Provider`) and the default
+  demo provider (`demo.DemoProvider`). `first_question`/`next_question` drive
+  dynamic grilling; `write_report` produces the brief.
 - **`app/sessions.py`** / **`app/security.py`** — session store, rate limiting,
   budgets, CSRF/origin and IP handling.
-- **`app/providers/`** — the adapter seam (`base.Provider`) and the default
-  demo provider (`demo.DemoProvider`).
-- **`app/model.py`** — pydantic models for profile, candidates, scorecards, plan.
-- **`app/markdown.py`** / **`app/plan_builder.py`** — Markdown export and plan
-  assembly.
+- **`app/model.py`** — pydantic models for the profile, grilling questions,
+  the transcript, and the report.
+- **`app/markdown.py`** — renders the report to Markdown for download.
 - **`app/templates/`** + **`app/static/`** — server-rendered pages and styles.
 
 ### Provider seam
 
 The app depends on `app.providers.base.Provider` only. The `demo` provider is
-deterministic and credential-free so the app and tests run anywhere. Real
-LLM/web-search/Qloo adapters implement the same interface and are registered in
+deterministic and credential-free so the app and tests run anywhere. A real
+adapter implements the same interface — dynamic grilling and report writing via
+an LLM, combined with Qloo data — and is registered in
 `app/providers/__init__.py` behind `VL_PROVIDER`. Before enabling live
 providers, review and disclose what each provider receives (retention,
-training, terms) per the plan.
+training, terms).
 
-## Demo data disclaimer
+## Demo note
 
-The demo provider ships placeholder research data and stable fake sources so the
-flow is fully testable. It is **not** real market data. Do not present it as such
-in a public demo.
+The demo provider generates questions and reports deterministically. It is a
+stand-in for a real LLM + Qloo integration, not real research or analysis. Do
+not present it as such in a public demo.
 
 ## Testing
 
 `pytest` (all tests require no live services):
 
-- `tests/test_scoring.py` — weights, anchors, withheld totals, ordering.
-- `tests/test_interview.py` — required gates, skips, assumptions.
+- `tests/test_workflow.py` — end-to-end grilling pipeline through FastAPI
+  (prompt → dynamic questions → report → download), CSRF, and budget caps.
+- `tests/test_provider_contract.py` — demo provider grilling + report behavior.
+- `tests/test_export.py` — Markdown report export.
 - `tests/test_security.py` — rate limit, budgets, CSRF, origin, IP.
-- `tests/test_provider_contract.py` — demo provider behaviors.
-- `tests/test_citations.py` — citations from retrieved sources; survive export.
-- `tests/test_export.py` — Markdown export; follow-up isolation.
-- `tests/test_workflow.py` — end-to-end user journey through FastAPI.
 
 ## Plan
 
-See `PROJECT_PLAN.md` for the full phased plan, accepted scope, test seams,
-risks, and intentionally deferred decisions (provider selection, hosting,
-ranking eligibility details).
+`PROJECT_PLAN.md` records the original scope. The pipeline described here —
+prompt → grilling → collect → model writes a report — is the current, leaner
+implementation; sizeable parts of the original plan (city/neighborhood scoring)
+are intentionally out of scope now.

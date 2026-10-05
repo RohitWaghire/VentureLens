@@ -224,6 +224,23 @@ ul.factors li { margin-bottom: .45rem; color: #384640; font-size: .82rem; }
 @keyframes ring-in { from { opacity: 0; transform: rotate(-35deg) scale(.8); } to { opacity: 1; transform: rotate(0) scale(1); } }
 @keyframes spark-pop { from { opacity: 0; transform: scale(0) translateY(7px); } to { opacity: 1; transform: scale(1) translateY(0); } }
 
+/* Grilling options + report */
+.option-set { display: flex; flex-wrap: wrap; gap: .5rem; margin: .25rem 0 .9rem; padding: 0; border: 0; }
+.option-chip { display: inline-flex; cursor: pointer; }
+.option-chip input { position: absolute; opacity: 0; pointer-events: none; }
+.option-chip span { padding: .5rem .85rem; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--ink-soft); font-size: .78rem; transition: .16s ease; }
+.option-chip:hover span { border-color: #a9cbb9; color: var(--accent); }
+.option-chip input:checked + span { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-dark); font-weight: 600; }
+.option-chip input:focus-visible + span { outline: 3px solid rgba(31,127,97,.38); outline-offset: 2px; }
+.turn { margin-top: .4rem; }
+.turn-copy .turn-question { margin: 0; font-size: .9rem; color: var(--ink-soft); }
+.report-shell { width: min(100%, 760px); }
+.report-body { margin-top: 2rem; text-align: left; }
+.report-section h2 { margin-top: 0; }
+.report-section p { margin: .35rem 0 0; white-space: pre-wrap; }
+.transcript-list { margin: 0; padding-left: 1.1rem; }
+.transcript-list li { margin-bottom: .6rem; color: var(--ink-soft); font-size: .85rem; }
+
 @media (max-width: 600px) {
   .site-header { min-height: 62px; padding: .75rem 1rem; }
   .tagline { max-width: 11.5rem; font-size: .67rem; text-align: right; }

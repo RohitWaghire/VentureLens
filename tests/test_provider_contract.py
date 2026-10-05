@@ -1,105 +1,92 @@
-"""Provider contract behavior with the deterministic demo provider."""
+"""Demo provider contract behavior: dynamic grilling + report writing."""
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
-from app.model import BusinessProfile
+from app.model import BusinessProfile, GrillTurn
 from app.providers.demo import DemoProvider
 
 P = DemoProvider()
 
 
-class TestOpeningExtraction:
-    def test_full_opening_prompt(self):
-        out = P.extract_opening(
+class TestOpening:
+    def test_extracts_idea_budget_region(self):
+        profile = P.extract_opening(
             "I have $250k and want to open a specialty coffee shop in Illinois."
         )
-        assert out["budget"] == "$250k"
-        assert out["region"] == "Illinois"
-        assert "specialty coffee shop" == out["idea"].strip()
+        assert profile.idea.strip() == "specialty coffee shop"
+        assert profile.budget == "$250k"
+        assert profile.region == "Illinois"
 
     def test_empty_prompt_is_safe(self):
-        assert P.extract_opening("") == {}
+        assert P.extract_opening("").idea == ""
 
 
-class TestRegionAndCities:
-    def test_region_valid_and_invalid(self):
-        assert P.region_valid("Illinois") is True
-        assert P.region_valid("IL") is True
-        assert P.region_valid("Nowhereland") is False
+class TestDynamicQuestions:
+    def test_first_question_has_options(self):
+        q = P.first_question(P.extract_opening("mutant poke bar"), "mutant poke bar")
+        assert q.id == "budget"
+        assert q.options
+        assert all(opt.label for opt in q.options)
 
-    def test_discover_cities_returns_three(self):
-        profile = BusinessProfile(idea="coffee shop", region="Illinois")
-        cities = P.discover_cities(profile)
-        assert len(cities) == 3
-        assert cities[0].name == "Chicago"
+    def test_budget_question_skipped_when_already_stated(self):
+        profile = P.extract_opening("I have $250k and want to open a coffee shop in Illinois.")
+        q = P.first_question(profile, profile.idea)
+        assert q.id != "budget"
 
-    def test_city_in_region(self):
-        profile = BusinessProfile(idea="coffee shop", region="Illinois")
-        assert P.city_in_region("Chicago", profile) is True
-        assert P.city_in_region("Phoenix", profile) is False
+    def test_questions_do_not_repeat(self):
+        profile = BusinessProfile(idea="coffee shop")
+        q_ids = []
+        q = P.first_question(profile, profile.idea)
+        turns = []
+        while q is not None:
+            q_ids.append(q.id)
+            turns.append(GrillTurn(question_id=q.id, question=q.text, answer="ok"))
+            q = P.next_question(profile, turns)
+        assert len(q_ids) == len(set(q_ids))
 
+    def test_cafe_prompt_surfaces_cafe_specific_question(self):
+        profile = BusinessProfile(idea="specialty coffee shop")
+        turns = [
+            GrillTurn(question_id="budget", question="Q1", answer="ok"),
+            GrillTurn(question_id="timeline", question="Q2", answer="ok"),
+            GrillTurn(question_id="audience", question="Q3", answer="ok"),
+            GrillTurn(question_id="concept", question="Q4", answer="ok"),
+        ]
+        q = P.next_question(profile, turns)
+        assert q.id == "coffee_position"
 
-class TestNeighborhoodAnalysis:
-    def test_chicago_scorecards_and_shortlist(self):
-        profile = BusinessProfile(idea="specialty coffee shop", region="Illinois")
-        comp = P.analyze_neighborhoods(profile, "Chicago", "cafe")
-        assert comp.template_name == "cafe"
-        assert len(comp.scorecards) >= 5
-        assert len(comp.shortlist) == 3
-
-    def test_incomplete_evidence_withholds_total(self):
-        profile = BusinessProfile(idea="coffee shop", region="Illinois")
-        comp = P.analyze_neighborhoods(profile, "Chicago", "cafe")
-        hyde = next(s for s in comp.scorecards if s.neighborhood == "Hyde Park")
-        assert hyde.all_scored is False
-        assert hyde.weighted_total is None
-        assert hyde.scored_count < 5
-
-    def test_fully_scored_rows_have_totals(self):
-        profile = BusinessProfile(idea="coffee shop", region="Illinois")
-        comp = P.analyze_neighborhoods(profile, "Chicago", "cafe")
-        complete = [s for s in comp.scorecards if s.neighborhood != "Hyde Park"]
-        assert all(s.all_scored for s in complete)
-        assert all(s.weighted_total is not None for s in complete)
-
-    def test_unsupported_category_uses_proxy_template(self):
-        profile = BusinessProfile(idea="dog-washing service", region="Illinois")
-        comp = P.analyze_neighborhoods(profile, "Chicago", "cafe")
-        assert comp.template_name == "cafe"
-        assert comp.template_proxy_for  # proxy template is disclosed
-
-
-class TestPlanSynthesis:
-    def _session(self, comparison, sel="Chicago"):
-        return SimpleNamespace(
-            profile=BusinessProfile(idea="specialty coffee shop", region="Illinois"),
-            selected_city=sel,
-            comparison=comparison,
+    def test_restaurant_prompt_surfaces_restaurant_specific_question(self):
+        profile = BusinessProfile(idea="a neighborhood pizzeria")
+        q = P.next_question(
+            profile,
+            [GrillTurn(question_id="budget", question="Q1", answer="ok")],
         )
+        ids = []
+        while q is not None:
+            ids.append(q.id)
+            q = P.next_question(
+                profile,
+                [GrillTurn(question_id=i, question="Q", answer="ok") for i in ids],
+            )
+        assert "cuisine" in ids
+        assert "coffee_position" not in ids
 
-    def test_plan_has_sections_and_citations(self):
-        profile = BusinessProfile(idea="specialty coffee shop", region="Illinois")
-        comp = P.analyze_neighborhoods(profile, "Chicago", "cafe")
-        session = self._session(comp)
-        plan = P.synthesize_plan(session)
-        assert plan.title
-        assert plan.location
-        assert plan.recommendations
-        assert any(plan.location[0].citations)
 
-    def test_leader_notes_withheld_total(self):
-        from app.model import NeighborhoodComparison, NeighborhoodScorecard
+class TestReport:
+    def test_report_reflects_answers_and_caveat(self):
+        profile = P.extract_opening("I have $120k and want to open a coffee shop in Texas.")
+        transcript = [
+            GrillTurn(question_id="timeline", question="Timing?", answer="Within 6 months"),
+            GrillTurn(question_id="audience", question="Audience?", answer="Students"),
+        ]
+        report = P.write_report(profile, transcript)
+        assert "coffee shop" in report.title
+        assert any(s.body == "Within 6 months" for s in report.sections)
+        assert any(s.body == "Students" for s in report.sections)
+        assert any(s.heading == "Target area" and s.body == "Texas" for s in report.sections)
+        assert report.caveat
 
-        leader = NeighborhoodScorecard(
-            city="X", neighborhood="Leader", category="cafe", factors=[],
-            weighted_total=None, all_scored=False, scored_count=3,
-        )
-        comp = NeighborhoodComparison(
-            city="X", category="cafe", template_name="cafe",
-            scorecards=[leader], shortlist=[], limitation_note="",
-        )
-        plan = P.synthesize_plan(self._session(comp, sel="X"))
-        combined = " ".join(c.text for c in plan.location)
-        assert "withheld" in combined
+    def test_empty_transcript_still_writes_report(self):
+        report = P.write_report(BusinessProfile(idea="bakery"), [])
+        assert report.sections
+        assert report.title == "Business brief — bakery"
