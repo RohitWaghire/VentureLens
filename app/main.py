@@ -16,12 +16,12 @@ from fastapi.templating import Jinja2Templates
 
 from app import markdown, scoring
 from app.config import Settings, get_settings
-from app.interview import InterviewState, QUESTION_SEQUENCE
+from app.interview import FIELD_INDEX, InterviewState, QUESTION_SEQUENCE
 from app.model import BusinessProfile
 from app.plan_builder import ensure_plan
 from app.providers import get_provider
 from app.providers.base import Provider
-from app.security import RateLimiter, QueryBudget, client_ip, csrf_token, origin_allowed
+from app.security import RateLimiter, QueryBudget, client_ip, csrf_token, verify_csrf, origin_allowed
 from app.sessions import Session, SessionStore
 
 _TEMPLATE_DIR = "app/templates"
@@ -86,6 +86,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "app_name": settings.app_name,
             "tagline": settings.tagline,
             "csrf": csrf_token(settings.secret_key, session) if session else "",
+            "demo_mode": getattr(provider, "name", "demo") == "demo",
         }
         base.update(extra)
         return base
@@ -93,12 +94,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def charge(session, count: int = 1) -> bool:
         return budget.register_spend(session, count)
 
+    def valid_form_token(session, token: str) -> bool:
+        return bool(session and verify_csrf(settings.secret_key, session, token))
+
     # --- entry / interview ----------------------------------------------------
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request):
         session = session_or_create(request)
         if session.interview is None:
             session.interview = InterviewState()
+        if not session.interview.answered.get("idea", "").strip():
+            response = templates.TemplateResponse(
+                request,
+                "landing.html",
+                ctx(request, session, error=request.query_params.get("error")),
+            )
+            set_cookie(response, session)
+            return response
         question = session.interview.next_question()
         if question is None:
             if session.profile is None:
@@ -107,13 +119,68 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 response = RedirectResponse("/cities", status_code=303)
             set_cookie(response, session)
             return response
+        pending = [
+            q for q in QUESTION_SEQUENCE
+            if q.field not in session.interview.answered and q.field not in session.interview.skipped
+        ]
+        history = []
+        for previous in QUESTION_SEQUENCE:
+            if previous.field == question.field:
+                break
+            if previous.field in session.interview.answered:
+                history.append({
+                    "question": previous.text,
+                    "answer": session.interview.answered[previous.field],
+                    "skipped": False,
+                })
+            elif previous.field in session.interview.skipped:
+                history.append({
+                    "question": previous.text,
+                    "answer": previous.skip_label or "Skipped for now",
+                    "skipped": True,
+                })
         ctx_data = ctx(
             request,
             session,
             question=question,
             answered=session.interview.answered,
+            skipped=session.interview.skipped,
+            questions=QUESTION_SEQUENCE,
+            history=history,
+            is_final_question=len(pending) == 1,
         )
         response = templates.TemplateResponse(request, "interview.html", ctx_data)
+        set_cookie(response, session)
+        return response
+
+    @app.post("/start", response_class=HTMLResponse)
+    def start_from_prompt(
+        request: Request,
+        prompt: str = Form(..., max_length=2000),
+        csrf: str = Form(...),
+    ):
+        """Start a session from the natural-language prompt composer."""
+        prompt = (prompt or "").strip()
+        if not prompt:
+            return RedirectResponse("/?error=Please describe your business idea to begin.", status_code=303)
+
+        session = store.get(request.cookies.get(settings.session_cookie_name))
+        if not valid_form_token(session, csrf):
+            return PlainTextResponse("Invalid session token. Refresh and try again.", status_code=403)
+        store.delete(session.id)
+        session = store.create()
+        session.interview = InterviewState()
+        extracted = provider.extract_opening(prompt)
+        # The prompt itself always captures the idea. The demo extractor may
+        # additionally prefill explicitly mentioned budget/region details.
+        extracted["idea"] = extracted.get("idea", "").strip() or prompt
+        if extracted.get("region") and not provider.region_valid(extracted["region"]):
+            extracted.pop("region", None)
+        for field, value in extracted.items():
+            if field in FIELD_INDEX and isinstance(value, str) and value.strip():
+                session.interview.record_answer(field, value.strip())
+
+        response = RedirectResponse("/", status_code=303)
         set_cookie(response, session)
         return response
 
@@ -123,10 +190,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         field: str = Form(...),
         answer: str = Form(""),
         skip: str = Form(""),
+        csrf: str = Form(...),
     ):
         session = session_only(request)
         if session is None:
             return RedirectResponse("/", status_code=303)
+        if not valid_form_token(session, csrf):
+            return PlainTextResponse("Invalid session token. Refresh and try again.", status_code=403)
         if session.interview is None:
             session.interview = InterviewState()
         q = next((x for x in QUESTION_SEQUENCE if x.field == field), None)
@@ -136,13 +206,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             else:
                 session.interview.record_answer(q.field, answer)
         if session.interview.next_question() is None:
-            # All questions resolved; move to the profile summary.
-            return RedirectResponse("/summary", status_code=303)
+            # Animate completion of the grilling flow before profile confirmation.
+            return RedirectResponse("/profile-ready", status_code=303)
         response = RedirectResponse("/", status_code=303)
         set_cookie(response, session)
         return response
 
     # --- profile summary & confirmation -------------------------------------
+    @app.get("/profile-ready", response_class=HTMLResponse)
+    def profile_ready(request: Request):
+        session = session_only(request)
+        if session is None or session.interview is None:
+            return RedirectResponse("/", status_code=303)
+        if session.interview.next_question() is not None:
+            return RedirectResponse("/", status_code=303)
+        profile = BusinessProfile(**session.interview.answered)
+        return templates.TemplateResponse(
+            request,
+            "profile_ready.html",
+            ctx(request, session, profile=profile),
+        )
+
     @app.get("/summary", response_class=HTMLResponse)
     def summary(request: Request):
         session = session_only(request)
@@ -177,10 +261,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         footprint: str = Form(""),
         competitors: str = Form(""),
         growth: str = Form(""),
+        csrf: str = Form(...),
     ):
         session = session_only(request)
         if session is None:
             return RedirectResponse("/", status_code=303)
+        if not valid_form_token(session, csrf):
+            return PlainTextResponse("Invalid session token. Refresh and try again.", status_code=403)
         values = {
             "idea": idea.strip(),
             "region": region.strip(),
@@ -230,10 +317,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         action: str = Form(...),
         city: str = Form(""),
+        csrf: str = Form(...),
     ):
         session = session_only(request)
         if session is None or session.profile is None:
             return RedirectResponse("/", status_code=303)
+        if not valid_form_token(session, csrf):
+            return PlainTextResponse("Invalid session token. Refresh and try again.", status_code=403)
         profile = session.profile
         if action == "select":
             if not charge(session, 1):
@@ -309,10 +399,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def followup(
         request: Request,
         question: str = Form(""),
+        csrf: str = Form(...),
     ):
         session = session_only(request)
         if session is None or session.comparison is None:
             return RedirectResponse("/neighborhoods", status_code=303)
+        if not valid_form_token(session, csrf):
+            return PlainTextResponse("Invalid session token. Refresh and try again.", status_code=403)
         question = (question or "").strip()
         if not question:
             return RedirectResponse("/plan", status_code=303)
@@ -323,16 +416,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return RedirectResponse("/plan#followups", status_code=303)
 
     @app.post("/close", response_class=HTMLResponse)
-    def close(request: Request):
+    def close(request: Request, csrf: str = Form(...)):
         sid = session_id(request)
+        session = store.get(sid)
+        if not valid_form_token(session, csrf):
+            return PlainTextResponse("Invalid session token. Refresh and try again.", status_code=403)
         if sid:
             store.delete(sid)
         response = RedirectResponse("/", status_code=303)
         response.delete_cookie(settings.session_cookie_name)
         return response
 
+    @app.post("/new", response_class=HTMLResponse)
+    def new_session(request: Request, csrf: str = Form(...)):
+        """Discard the current session and return to a fresh prompt composer."""
+        sid = session_id(request)
+        session = store.get(sid)
+        if not valid_form_token(session, csrf):
+            return PlainTextResponse("Invalid session token. Refresh and try again.", status_code=403)
+        store.delete(sid)
+        response = RedirectResponse("/", status_code=303)
+        response.delete_cookie(settings.session_cookie_name)
+        return response
+
     @app.get("/error", response_class=HTMLResponse)
     def error_page(request: Request):
+        session = session_only(request)
         reason = request.query_params.get("reason", "unknown")
         message = {
             "budget": "This session has used its research allowance. Start a new session to continue.",
@@ -340,7 +449,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return templates.TemplateResponse(
             request,
             "error.html",
-            ctx(request, None, message=message),
+            ctx(request, session, message=message),
         )
 
     app.mount("/static", StaticFiles(directory="app/static"), name="static")

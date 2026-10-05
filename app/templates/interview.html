@@ -1,25 +1,61 @@
 {% extends "base.html" %}
+{% block title %}Planning conversation · {{ app_name }}{% endblock %}
 {% block content %}
-  <section class="card">
-    <h1>Let’s explore your business idea.</h1>
-    <p class="muted">One question at a time. You can skip most questions; anything
-    you skip will be labeled as an assumption.</p>
+  {% set total = questions|length %}
+  {% set current_number = answered|length + skipped|length + 1 %}
+  <section class="interview-shell" aria-labelledby="interview-title">
+    <div class="interview-topline">
+      <form method="post" action="/new" class="inline-form">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button type="submit" class="back-link">← <span>New idea</span></button>
+      </form>
+      <span class="session-label"><span class="session-dot" aria-hidden="true"></span> PRIVATE SESSION</span>
+    </div>
 
-    <div class="step">Question {{ answered|length + 1 }} of {{ 9 }}</div>
+    <div class="conversation" aria-live="polite" aria-relevant="additions text">
+      {% for turn in history %}
+        <div class="history-turn {% if turn.skipped %}history-skipped{% endif %}">
+          <div class="history-question"><span class="assistant-mark mini" aria-hidden="true">V</span><p>{{ turn.question }}</p></div>
+          <div class="user-message {% if turn.skipped %}user-message-skipped{% endif %}">
+            <span class="user-message-label">{% if turn.skipped %}LEFT OPEN{% else %}YOU{% endif %}</span>
+            <p>{{ turn.answer }}</p>
+          </div>
+        </div>
+      {% endfor %}
+      <div class="assistant-message">
+        <div class="assistant-mark" aria-hidden="true">V</div>
+        <div>
+          <p class="message-byline">VENTURELENS <span>· PLANNING GUIDE</span></p>
+          <h1 id="interview-title" class="question-title">{{ question.text }}</h1>
+        </div>
+      </div>
 
-    <form method="post" action="/interview">
+    </div>
+
+    <div class="progress-wrap" aria-label="Interview progress">
+      <div class="progress-meta"><span>YOUR BUSINESS PROFILE</span><span>STEP {{ current_number }} OF {{ total }}</span></div>
+      <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="{{ total }}" aria-valuenow="{{ current_number - 1 }}" aria-label="Interview questions answered">
+        <span style="width: {{ ((current_number - 1) / total * 100)|round|int }}%"></span>
+      </div>
+    </div>
+
+    {% if demo_mode %}<p class="demo-note interview-demo-note">Illustrative demo flow · no live research runs during this conversation.</p>{% endif %}
+
+    <form class="reply-composer" method="post" action="/interview" data-loading-message="Saving your answer…">
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <input type="hidden" name="field" value="{{ question.field }}">
-
-      <label for="answer">{{ question.text }}</label>
-      <textarea id="answer" name="answer" rows="3"
-        placeholder="{{ question.placeholder }}"></textarea>
-
-      <div class="actions">
-        <button type="submit">Continue</button>
-        {% if not question.required and question.skip_label %}
-          <button type="submit" name="skip" value="1" class="ghost">{{ question.skip_label }}</button>
-        {% endif %}
+      <label for="answer" class="sr-only">{{ question.text }}</label>
+      <textarea id="answer" name="answer" rows="2" placeholder="{{ question.placeholder or 'Share what you have in mind…' }}" {% if question.required %}required{% endif %}></textarea>
+      <div class="reply-footer">
+        <span class="keyboard-hint">↵ <span>Continue when ready</span></span>
+        <div class="reply-actions">
+          {% if not question.required and question.skip_label %}
+            <button type="submit" name="skip" value="1" class="skip-button">Skip this question</button>
+          {% endif %}
+          <button type="submit" class="send-button reply-send" aria-label="Continue interview">
+            <span>Continue</span><span class="send-arrow" aria-hidden="true">↗</span>
+          </button>
+        </div>
       </div>
     </form>
   </section>

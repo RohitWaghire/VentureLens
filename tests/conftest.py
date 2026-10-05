@@ -6,6 +6,8 @@ flow can run deterministically with the demo provider (no credentials needed).
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from app.config import Settings
@@ -39,15 +41,23 @@ def client(app):
         yield c
 
 
+def csrf_for(client, path: str = "/") -> str:
+    """Read the rendered per-session CSRF token from a page response."""
+    response = client.get(path)
+    match = re.search(r'name="csrf" value="([a-f0-9]+)"', response.text)
+    assert match, f"CSRF token not found on {path}"
+    return match.group(1)
+
+
 @pytest.fixture
 def flow(client):
     """A session driven to the plan page via the demo provider."""
-    client.get("/")  # create session + cookie
+    csrf = csrf_for(client)  # create session + cookie
     client.post(
         "/summary",
-        data={"idea": "specialty coffee shop", "region": "Illinois"},
+        data={"idea": "specialty coffee shop", "region": "Illinois", "csrf": csrf},
     )
     client.get("/cities")
-    client.post("/cities", data={"action": "select", "city": "Chicago"})
+    client.post("/cities", data={"action": "select", "city": "Chicago", "csrf": csrf})
     client.get("/neighborhoods")
     return client

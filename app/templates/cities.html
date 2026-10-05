@@ -14,7 +14,7 @@
         {% for cite in city.citations %}
           <a class="cite" href="{{ cite.url }}">{{ cite.title }}</a>
         {% endfor %}
-        <form method="post" action="/cities">
+        <form method="post" action="/cities" data-loading-message="Comparing neighborhoods in {{ city.name }}…">
           <input type="hidden" name="csrf" value="{{ csrf }}">
           <input type="hidden" name="action" value="select">
           <input type="hidden" name="city" value="{{ city.name }}">
@@ -24,17 +24,18 @@
     {% endfor %}
 
     <div class="row">
-      <form method="post" action="/cities">
+      <form method="post" action="/cities" data-loading-message="Finding more city options…">
         <input type="hidden" name="csrf" value="{{ csrf }}">
         <input type="hidden" name="action" value="alternatives">
         <input type="hidden" name="city" value="">
         <button type="submit">Request 3 alternative cities</button>
       </form>
 
-      <form method="post" action="/cities">
+      <form method="post" action="/cities" data-loading-message="Checking your city and preparing neighborhood options…">
         <input type="hidden" name="csrf" value="{{ csrf }}">
         <input type="hidden" name="action" value="custom">
-        <input name="city" placeholder="Enter another city in {{ region }}">
+        <label class="sr-only" for="custom-city">Enter another city in {{ region }}</label>
+        <input id="custom-city" name="city" placeholder="Enter another city in {{ region }}" required>
         <button type="submit" class="ghost">Use this city</button>
       </form>
     </div>

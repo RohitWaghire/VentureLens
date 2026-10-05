@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}VentureLens — A clearer view of where to grow{% endblock %}
+{% block content %}
+  <section class="landing-shell" aria-labelledby="welcome-title">
+    <div class="eyebrow"><span class="eyebrow-mark" aria-hidden="true"></span> BUSINESS STRATEGY, GROUNDED IN PLACE</div>
+    <h1 id="welcome-title">A clearer view of<br><span>where to grow.</span></h1>
+    <p class="landing-intro">Start with the idea. We’ll ask a few thoughtful questions, then help you explore the right market for it.</p>
+
+    {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+
+    <form class="prompt-composer" method="post" action="/start" data-loading-message="Starting your planning session…">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label for="opening-prompt" class="sr-only">Describe your business idea and U.S. region</label>
+      <textarea id="opening-prompt" name="prompt" rows="3" maxlength="2000" required
+        placeholder="I have $250k and want to open a specialty coffee shop in Illinois."></textarea>
+      <div class="composer-footer">
+        <span class="composer-hint"><span aria-hidden="true">↳</span> Include a U.S. state or region to begin</span>
+        <button class="send-button" type="submit" aria-label="Start planning session">
+          <span>Start exploring</span><span class="send-arrow" aria-hidden="true">↗</span>
+        </button>
+      </div>
+    </form>
+
+    <div class="prompt-examples" aria-label="Example business ideas">
+      <span class="examples-label">TRY AN EXAMPLE</span>
+      <button type="button" class="example-chip" data-prompt="I have $250k and want to open a specialty coffee shop in Illinois.">Specialty coffee · Illinois</button>
+      <button type="button" class="example-chip" data-prompt="I want to open a neighborhood restaurant in Texas.">Neighborhood restaurant · Texas</button>
+    </div>
+
+    <div class="trust-note"><span aria-hidden="true">✳</span> Your answers stay in this session. Optional details can be skipped.</div>
+    {% if demo_mode %}<p class="demo-note">Preview mode: recommendations use illustrative demo data, not live research.</p>{% endif %}
+  </section>
+  <script>
+    (function () {
+      var input = document.getElementById('opening-prompt');
+      document.querySelectorAll('[data-prompt]').forEach(function (button) {
+        button.addEventListener('click', function () {
+          if (!input) return;
+          input.value = button.getAttribute('data-prompt') || '';
+          input.focus();
+        });
+      });
+    })();
+  </script>
+{% endblock %}

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tests.conftest import csrf_for
+
 
 class TestDownloadEndpoint:
     def test_download_returns_markdown_with_inline_links(self, flow):
@@ -23,11 +25,13 @@ class TestDownloadEndpoint:
 class TestFollowupIsolation:
     def test_followup_does_not_change_downloaded_plan(self, flow):
         before = flow.get("/plan/download").text
-        flow.post("/followup", data={"question": "Which neighborhood suits students?"})
+        token = csrf_for(flow, "/plan")
+        flow.post("/followup", data={"question": "Which neighborhood suits students?", "csrf": token})
         after = flow.get("/plan/download").text
         assert before == after, "follow-up must not mutate the exported plan"
 
     def test_followup_answer_appears_in_chat(self, flow):
-        flow.post("/followup", data={"question": "Which neighborhood suits students?"})
+        token = csrf_for(flow, "/plan")
+        flow.post("/followup", data={"question": "Which neighborhood suits students?", "csrf": token})
         page = flow.get("/plan").text
-        assert "leading recommendation" in page or "{{ short_top }}" not in page
+        assert "Based on the current findings, the leading recommendation is" in page

@@ -3,15 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ app_name }}</title>
+  <title>{% block title %}{{ app_name }} — {{ tagline }}{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 </head>
 <body>
   <header class="site-header">
-    <a class="brand" href="/"><strong>{{ app_name }}</strong></a>
+    <a class="brand" href="/" aria-label="{{ app_name }} home"><strong>{{ app_name }}</strong></a>
     <span class="tagline">{{ tagline }}</span>
   </header>
-  <main class="container">
+  <main class="container" id="main-content">
     {% block content %}{% endblock %}
   </main>
   <footer class="site-footer">
@@ -19,18 +20,31 @@
     labeled assumptions — not guarantees of outcomes. Demo provider only.</p>
   </footer>
 
-  <div id="loading" class="loading hidden">
-    <div class="spinner"></div>
-    <p>Working…</p>
+  <div id="loading" class="loading hidden" role="status" aria-live="polite" aria-atomic="true">
+    <div class="spinner" aria-hidden="true"></div>
+    <p class="loading-copy">Working…</p>
   </div>
 
   <script>
     (function () {
       var loading = document.getElementById('loading');
       document.addEventListener('submit', function (e) {
-        if (e.target.tagName === 'FORM') {
-          loading.classList.remove('hidden');
-        }
+        var form = e.target;
+        if (!(form instanceof HTMLFormElement) || !form.dataset.loadingMessage) return;
+        var copy = loading.querySelector('.loading-copy');
+        if (copy) copy.textContent = form.dataset.loadingMessage;
+        loading.setAttribute('aria-label', form.dataset.loadingMessage);
+        loading.classList.remove('hidden');
+      });
+      document.addEventListener('keydown', function (e) {
+        var field = e.target;
+        if (!(field instanceof HTMLTextAreaElement) || e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+        if (!field.closest('.prompt-composer, .reply-composer')) return;
+        var form = field.form;
+        if (!form || !form.reportValidity()) return;
+        e.preventDefault();
+        if (typeof form.requestSubmit === 'function') form.requestSubmit();
+        else form.submit();
       });
     })();
   </script>

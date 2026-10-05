@@ -3,6 +3,9 @@
   <section class="card">
     <h1>Heads up</h1>
     <p>{{ message }}</p>
-    <div class="actions"><a class="btn" href="/close">Start a new session</a></div>
+    <form method="post" action="/close">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <div class="actions"><button type="submit" class="ghost">Start a new session</button></div>
+    </form>
   </section>
 {% endblock %}

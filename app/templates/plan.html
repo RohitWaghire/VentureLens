@@ -60,7 +60,7 @@
       </div>
     {% endfor %}
 
-    <form method="post" action="/followup">
+    <form method="post" action="/followup" data-loading-message="Checking your follow-up against the current findings…">
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <label for="q">Ask a follow-up</label>
       <textarea id="q" name="question" rows="2" placeholder="e.g. Which neighborhood best fits students?"></textarea>

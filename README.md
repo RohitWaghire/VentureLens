@@ -14,6 +14,12 @@ plan with clickable source citations inline.
 
 ## Key behaviors
 
+- **Prompt-first entry** — start with a natural-language business idea in a
+  centered composer, then continue into the guided one-question-at-a-time
+  planning interview. Example prompts can prefill the composer.
+- **Interview completion transition** — a reduced-motion-aware orb-inspired
+  animation marks profile completion and hands off to profile review; it does
+  not claim that live research has run.
 - **Adaptive interview** — one question at a time. A business idea and a U.S.
   state/region are required; every other question may be skipped and becomes a
   labeled assumption.
