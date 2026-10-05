@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="card">
+    <h1>Let’s explore your business idea.</h1>
+    <p class="muted">One question at a time. You can skip most questions; anything
+    you skip will be labeled as an assumption.</p>
+
+    <div class="step">Question {{ answered|length + 1 }} of {{ 9 }}</div>
+
+    <form method="post" action="/interview">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="field" value="{{ question.field }}">
+
+      <label for="answer">{{ question.text }}</label>
+      <textarea id="answer" name="answer" rows="3"
+        placeholder="{{ question.placeholder }}"></textarea>
+
+      <div class="actions">
+        <button type="submit">Continue</button>
+        {% if not question.required and question.skip_label %}
+          <button type="submit" name="skip" value="1" class="ghost">{{ question.skip_label }}</button>
+        {% endif %}
+      </div>
+    </form>
+  </section>
+{% endblock %}

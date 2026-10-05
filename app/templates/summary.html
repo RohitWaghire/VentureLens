@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="card">
+    <h1>Confirm your business profile</h1>
+    <p class="muted">Review or edit the details below. A business idea and a
+    U.S. state/region are required; the rest may be left blank and will be
+    treated as assumptions.</p>
+
+    {% if error %}<p class="alert">{{ error }}</p>{% endif %}
+
+    <form method="post" action="/summary">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+
+      <label>Business idea *</label>
+      <textarea name="idea" rows="2">{{ profile.idea }}</textarea>
+
+      <label>U.S. state or region *</label>
+      <input name="region" value="{{ profile.region }}">
+
+      <label>Start-up budget</label>
+      <input name="budget" value="{{ profile.budget }}" placeholder="e.g. $250k">
+
+      <label>Target customer / audience</label>
+      <input name="audience" value="{{ profile.audience }}">
+
+      <label>Concept / positioning</label>
+      <input name="concept" value="{{ profile.concept }}">
+
+      <label>Price point</label>
+      <input name="price" value="{{ profile.price }}">
+
+      <label>Footprint</label>
+      <input name="footprint" value="{{ profile.footprint }}">
+
+      <label>Competitors</label>
+      <input name="competitors" value="{{ profile.competitors }}">
+
+      <label>Growth goals</label>
+      <input name="growth" value="{{ profile.growth }}">
+
+      {% if assumptions %}
+        <div class="assumptions">
+          <strong>Labeled assumptions:</strong>
+          <ul>{% for a in assumptions %}<li>{{ a }}</li>{% endfor %}</ul>
+        </div>
+      {% endif %}
+
+      <div class="actions">
+        <button type="submit">Confirm &amp; Start Research</button>
+        <button type="submit" class="ghost">Skip confirmation / proceed with these answers</button>
+      </div>
+    </form>
+  </section>
+{% endblock %}

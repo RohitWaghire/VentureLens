@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="card">
+    <h1>Top candidate cities</h1>
+    <p class="muted">Based on your profile for <strong>{{ region }}</strong>.
+    Choose one to continue, request alternatives, or enter another city in the region.</p>
+
+    {% if error %}<p class="alert">{{ error }}</p>{% endif %}
+
+    {% for city in cities %}
+      <div class="option">
+        <h2>{{ loop.index }}. {{ city.name }}</h2>
+        <p>{{ city.rationale }}</p>
+        {% for cite in city.citations %}
+          <a class="cite" href="{{ cite.url }}">{{ cite.title }}</a>
+        {% endfor %}
+        <form method="post" action="/cities">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <input type="hidden" name="action" value="select">
+          <input type="hidden" name="city" value="{{ city.name }}">
+          <button type="submit" class="small">Choose {{ city.name }}</button>
+        </form>
+      </div>
+    {% endfor %}
+
+    <div class="row">
+      <form method="post" action="/cities">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="action" value="alternatives">
+        <input type="hidden" name="city" value="">
+        <button type="submit">Request 3 alternative cities</button>
+      </form>
+
+      <form method="post" action="/cities">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="action" value="custom">
+        <input name="city" placeholder="Enter another city in {{ region }}">
+        <button type="submit" class="ghost">Use this city</button>
+      </form>
+    </div>
+  </section>
+{% endblock %}

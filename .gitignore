@@ -1,0 +1,21 @@
+# Dependencies / virtualenv
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Secrets & local env
+.env
+*.env
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime logs
+*.log
