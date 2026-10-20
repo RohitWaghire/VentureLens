@@ -187,6 +187,228 @@ def test_model_rewrites_qloo_places_without_raw_tags():
     assert "Impulse visit" not in section.body
 
 
+def test_search_phrases_come_from_the_idea_itself():
+    from app.providers.live import _search_phrases
+
+    chocolate = _search_phrases(
+        BusinessProfile(idea="boxed chocolate shop"),
+        [],
+        "I want a boxed chocolate shop in New Hampshire",
+    )
+    yoga = _search_phrases(
+        BusinessProfile(idea="yoga studio"),
+        [],
+        "I want to open a yoga studio in Austin",
+    )
+    books = _search_phrases(
+        BusinessProfile(idea="used bookstore"),
+        [],
+        "I want a used bookstore in Portland",
+    )
+    assert chocolate[0] == "chocolate"
+    assert "yoga" in yoga
+    assert books[0] == "bookstore"
+    canned = {"coffee shop", "chocolate shop", "grocery store", "candy store"}
+    assert canned.isdisjoint(yoga)
+    assert canned.isdisjoint(books)
+
+
+def test_roofing_business_prefers_the_contractor():
+    from app.providers.live import _best_tag
+
+    tag = _best_tag(
+        [
+            (
+                "roofing",
+                [
+                    {
+                        "id": "urn:tag:category:place:roofing_supply_store",
+                        "name": "Roofing supply store",
+                        "type": "urn:tag:category:place",
+                    },
+                    {
+                        "id": "urn:tag:category:place:roofing_contractor",
+                        "name": "Roofing contractor",
+                        "type": "urn:tag:category:place",
+                    },
+                ],
+            )
+        ]
+    )
+    assert tag is not None
+    assert tag["id"] == "urn:tag:category:place:roofing_contractor"
+
+
+def test_far_places_are_left_out_of_a_city_brief():
+    settings = _settings()
+    calls = []
+
+    def fetch(method, url, headers, body, timeout):
+        if method != "GET":
+            return _brief()
+        calls.append(url)
+        query = parse_qs(urlparse(url).query)
+        if "/v2/tags" in url:
+            return 200, json.dumps(
+                {
+                    "results": {
+                        "tags": [
+                            {
+                                "id": "urn:tag:category:place:roofing_contractor",
+                                "name": "Roofing contractor",
+                                "type": "urn:tag:category:place",
+                            }
+                        ]
+                    }
+                }
+            ).encode()
+        location = query.get("filter.location.query", [""])[0]
+        if location == "Albany":
+            return 200, json.dumps(
+                {
+                    "query": {
+                        "localities": {
+                            "filter": [
+                                {
+                                    "name": "Albany",
+                                    "disambiguation": "Albany, Albany County, New York, United States",
+                                    "location": {"lat": 42.65, "lon": -73.75},
+                                }
+                            ]
+                        }
+                    },
+                    "results": {"entities": []},
+                }
+            ).encode()
+        return 200, json.dumps(
+            {
+                "results": {
+                    "entities": [
+                        {
+                            "name": "Four Winds Chimney",
+                            "entity_id": "near",
+                            "disambiguation": "831 NY-67 Ballston Spa, NY 12020",
+                            "location": {"lat": 42.9, "lon": -73.85},
+                            "properties": {"short_description": "Chimney service in Ballston Spa."},
+                        },
+                        {
+                            "name": "The Home Depot",
+                            "entity_id": "far",
+                            "disambiguation": "4625 Rue Saint-Antoine O Montreal, Quebec H4C 1E2 Canada",
+                            "location": {"lat": 45.5, "lon": -73.57},
+                            "properties": {"short_description": "Home improvement store in Montreal."},
+                        },
+                    ]
+                }
+            }
+        ).encode()
+
+    report = LiveProvider(settings, fetch).write_report(
+        BusinessProfile(idea="roofing repair business", region="Albany"),
+        "I want to open a roofing repair business in Albany",
+        [],
+    )
+    insights = [url for url in calls if "/v2/insights" in url]
+    assert [parse_qs(urlparse(url).query)["filter.location.query"][0] for url in insights] == [
+        "Albany",
+        "New York",
+    ]
+    taste = next(section.body for section in report.sections if section.heading == "What similar places suggest")
+    assert "Four Winds Chimney" in taste
+    assert "Home Depot" not in taste
+    assert "Montreal" not in taste
+    assert "is described as" not in taste
+
+
+def test_chocolate_shop_prefers_the_shop_category():
+    from app.providers.live import _best_tag
+
+    tag = _best_tag(
+        [
+            (
+                "chocolate",
+                [
+                    {
+                        "id": "urn:tag:category:place:chocolate",
+                        "name": "Chocolate",
+                        "type": "urn:tag:category:place",
+                    },
+                    {
+                        "id": "urn:tag:category:place:chocolate_shop",
+                        "name": "Chocolate shop",
+                        "type": "urn:tag:category:place",
+                    },
+                    {
+                        "id": "urn:tag:category:place:chocolate_manufacturer",
+                        "name": "Chocolate manufacturer",
+                        "type": "urn:tag:category:place",
+                    },
+                ],
+            )
+        ]
+    )
+    assert tag is not None
+    assert tag["id"] == "urn:tag:category:place:chocolate_shop"
+
+
+def test_empty_local_results_stay_in_the_region():
+    settings = _settings()
+    calls = []
+
+    def fetch(method, url, headers, body, timeout):
+        if method != "GET":
+            return _brief()
+        calls.append(url)
+        if "/v2/tags" in url:
+            return 200, json.dumps(
+                {
+                    "results": {
+                        "tags": [
+                            {
+                                "id": "urn:tag:category:place:chocolate",
+                                "name": "Chocolate",
+                                "type": "urn:tag:category:place",
+                            },
+                            {
+                                "id": "urn:tag:category:place:chocolate_shop",
+                                "name": "Chocolate shop",
+                                "type": "urn:tag:category:place",
+                            },
+                        ]
+                    }
+                }
+            ).encode()
+        query = parse_qs(urlparse(url).query)
+        tag = query.get("filter.tags", [""])[0]
+        if tag.endswith(":chocolate_shop"):
+            return 200, b'{"results":{"entities":[]}}'
+        return 200, json.dumps(
+            {
+                "results": {
+                    "entities": [
+                        {
+                            "name": "Granite State Candy Shoppe",
+                            "entity_id": "place-nh",
+                            "properties": {"short_description": "Artisanal chocolate shop in Concord."},
+                        }
+                    ]
+                }
+            }
+        ).encode()
+
+    report = LiveProvider(settings, fetch).write_report(
+        BusinessProfile(idea="chocolate shop", region="New Hampshire"),
+        "I want to open a chocolate shop in New Hampshire.",
+        [],
+    )
+    insights = [url for url in calls if "/v2/insights" in url]
+    assert insights
+    for url in insights:
+        assert parse_qs(urlparse(url).query)["filter.location.query"] == ["New Hampshire"]
+    taste = next(section.body for section in report.sections if section.heading == "What similar places suggest")
+    assert "Granite State Candy Shoppe" in taste
+
+
 def test_uncertain_tag_does_not_call_insights():
     settings = _settings()
     calls = []

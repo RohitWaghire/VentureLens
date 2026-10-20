@@ -162,18 +162,27 @@ def extract_opening(text: str) -> BusinessProfile:
     if budget:
         profile.budget = budget.group(0)
     low = text.lower()
+    state = ""
     for _abbr, name in data.US_STATES.items():
         if name.lower() in low:
-            profile.region = name
+            state = name
             break
-    if not profile.region:
-        if re.search(r"\bnyc\b", low) or "new york city" in low:
-            profile.region = "New York"
-        else:
-            for metro in data.KNOWN_METROS:
-                if metro in low:
-                    profile.region = metro.title()
-                    break
+    if not state and (re.search(r"\bnyc\b", low) or "new york city" in low):
+        state = "New York"
+    place = _place_after_in(text)
+    if place.lower() in {"nyc", "new york city"}:
+        place = "New York"
+    if not state and not place:
+        for metro in data.KNOWN_METROS:
+            if metro in low:
+                state = metro.title()
+                break
+    if place and state and place.lower() != state.lower():
+        profile.region = f"{place}, {state}"
+    elif state:
+        profile.region = state
+    elif place:
+        profile.region = place
     idea_raw = None
     for phrase in ("open a ", "launch a ", "start a "):
         if phrase in low:
@@ -181,9 +190,33 @@ def extract_opening(text: str) -> BusinessProfile:
             break
     if idea_raw is None:
         idea_raw = text
-    idea_raw = re.split(r"\bin\s+[A-Z][\w-]*", idea_raw)[0].strip(" .,;:")
+    idea_raw = re.split(r"\bin\s+[A-Za-z]", idea_raw, maxsplit=1)[0].strip(" .,;:")
     profile.idea = idea_raw
     return profile
+
+
+_NOT_A_PLACE = {
+    "a", "an", "the", "addition", "general", "mind", "store", "shop", "house",
+    "person", "order", "front", "fact", "place", "business", "my", "our",
+    "this", "that", "your", "town", "home", "it",
+}
+
+
+def _place_after_in(text: str) -> str:
+    """The capitalized place in 'in Albany', when the prompt names one."""
+    match = re.search(
+        r"\bin\s+([A-Za-z][\w.'-]*(?:\s+[A-Za-z][\w.'-]*){0,2})",
+        text or "",
+    )
+    if not match:
+        return ""
+    kept = []
+    for raw in match.group(1).split():
+        word = raw.strip(".,;:")
+        if not word or word.lower() in _NOT_A_PLACE:
+            break
+        kept.append(word if word.isupper() and len(word) <= 3 else word.capitalize())
+    return " ".join(kept)
 
 
 def _applicable(profile: BusinessProfile) -> List[Dict]:

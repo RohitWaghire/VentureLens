@@ -17,6 +17,11 @@ class TestOpening:
         assert profile.budget == "$250k"
         assert profile.region == "Illinois"
 
+    def test_a_city_is_the_region_when_it_is_not_a_state(self):
+        profile = P.extract_opening("I want to open a roofing repair business in Albany")
+        assert profile.region == "Albany"
+        assert profile.idea.strip() == "roofing repair business"
+
     def test_empty_prompt_is_safe(self):
         assert P.extract_opening("").idea == ""
 

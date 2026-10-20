@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import socket
 import urllib.error
@@ -112,11 +113,28 @@ class LiveProvider(Provider):
         phrases = _search_phrases(profile, transcript, opening)
         location = _location(profile, transcript, opening)
         self._qloo_down = False
-        tag = _best_tag([(phrase, self._tags_for(phrase)) for phrase in phrases])
-        if tag is None or self._qloo_down:
+        idea_words = _distinctive_words(f"{profile.idea} {opening}")
+        tags = _ranked_tags(
+            [(phrase, self._tags_for(phrase)) for phrase in phrases],
+            idea_words,
+        )
+        if not tags or self._qloo_down:
             return []
-        params = place_insights_params(tag["id"], location)
-        status, payload = self._qloo_get("/v2/insights", params, timeout=60)
+        # A named city stays on the request. An empty city is not a reason to
+        # search the world; the only wider call is the same state, and only
+        # places near that city are kept.
+        for tag in tags[:2]:
+            places = self._local_places(tag["id"], location)
+            if places or self._qloo_down:
+                return places
+        return []
+
+    def _insights(self, tag_id: str, location: str) -> tuple[int, object]:
+        status, payload = self._qloo_get(
+            "/v2/insights",
+            place_insights_params(tag_id, location),
+            timeout=60,
+        )
         if status in (401, 403):
             raise ProviderError(
                 "Qloo refused the request. Use a hackathon key with "
@@ -124,9 +142,26 @@ class LiveProvider(Provider):
             )
         if status == 429:
             raise ProviderError("Qloo rate limit reached. Try again shortly.")
-        if status != 200:
+        return status, payload
+
+    def _local_places(self, tag_id: str, location: str) -> list[dict]:
+        status, payload = self._insights(tag_id, location)
+        if self._qloo_down:
             return []
-        return _entities(payload)
+        center = _resolved_locality(payload)
+        places = _entities(payload) if status == 200 else []
+        if not _is_city(center):
+            return _dedupe_places(places)
+        places = _within_miles(places, center, _CITY_MILES)
+        if places:
+            return _dedupe_places(places)
+        state = str(center.get("state") or "")
+        if not state or state.lower() == location.lower():
+            return []
+        status, wider = self._insights(tag_id, state)
+        if self._qloo_down or status != 200:
+            return []
+        return _dedupe_places(_within_miles(_entities(wider), center, _CITY_MILES))
 
     def _tags_for(self, phrase: str) -> list[dict]:
         if getattr(self, "_qloo_down", False):
@@ -242,11 +277,12 @@ class LiveProvider(Provider):
                     "role": "system",
                     "content": (
                         "Turn Qloo place results into a short note a founder can read. "
-                        "Return JSON {\"body\": \"...\"}. Write 2 to 4 plain sentences. "
-                        "Name the places and say what they have in common for this business. "
+                        "Return JSON {\"body\": \"...\"}. Write 2 or 3 plain sentences. "
+                        "Name at most four places and the town each one is in. "
+                        "Do not repeat a chain, and do not paste the source descriptions. "
                         "Do not list tags, scores, age ranges, or payment methods. "
                         "Do not invent places that are not in the list. "
-                        "These are aggregate taste matches, not proof of demand."
+                        "Say when the list is thin. These are aggregate taste matches, not proof of demand."
                     ),
                 },
                 {
@@ -256,8 +292,12 @@ class LiveProvider(Provider):
                             "business": profile.idea,
                             "region": profile.region,
                             "places": [
-                                {"name": place["name"], "about": place.get("detail") or ""}
-                                for place in signals[:8]
+                                {
+                                    "name": place["name"],
+                                    "where": place.get("where") or "",
+                                    "about": place.get("detail") or "",
+                                }
+                                for place in signals[:6]
                             ],
                         }
                     ),
@@ -268,7 +308,7 @@ class LiveProvider(Provider):
         if isinstance(parsed, dict):
             body = str(parsed.get("body") or "").strip()
         if not body:
-            body = _plain_places(signals)
+            body = _plain_places(signals, profile.region)
         return ReportSection(heading=heading, body=body)
 
     def _chat(self, messages: list) -> Optional[dict]:
@@ -291,7 +331,14 @@ class LiveProvider(Provider):
             return None
         if status != 200:
             return None
-        return _parse_json_object(_message_content(_json_bytes(raw)))
+        content = _message_content(_json_bytes(raw))
+        parsed = _parse_json_object(content)
+        if parsed:
+            return parsed
+        text = (content or "").strip()
+        if text and not text.startswith("{") and len(text) < 700:
+            return {"body": text}
+        return None
 
     def _narrate(
         self,
@@ -314,6 +361,7 @@ class LiveProvider(Provider):
                         "signals in the user message. Do not invent places, scores, "
                         "or demand. Call anything beyond those inputs an assumption. "
                         "Qloo signals are aggregate taste, not proof of profit. "
+                        "Do not mention tags or paste source descriptions. "
                         "Do not add a section titled Taste signals or What similar places suggest."
                     ),
                 },
@@ -396,39 +444,18 @@ def _search_phrases(
     transcript: List[GrillTurn],
     opening: str = "",
 ) -> list[str]:
-    """Concepts worth resolving to a Qloo tag. Place answers are not concepts."""
+    """The idea's own words, longest first. No fixed list of business types."""
     idea = (profile.idea or opening or "").strip()
-    phrases = []
-    canonical = _canonical_concept(idea)
-    if canonical:
-        phrases.append(canonical)
-    if canonical == "coffee shop":
-        phrases.append("cafe")
-    if idea and idea.lower() not in {phrase.lower() for phrase in phrases}:
-        phrases.append(idea)
-    for turn in transcript:
-        question = turn.question.lower()
-        answer = (turn.answer or "").strip()
-        if not answer or answer.lower() in _GENERIC_ANSWERS:
-            continue
-        if any(word in question for word in ("where", "city", "neighborhood", "location", "budget", "when", "team")):
-            continue
-        if answer.lower() not in {phrase.lower() for phrase in phrases}:
-            phrases.append(answer)
-    return phrases[:3] or ["local business"]
+    return _content_words(idea)[:2] or ["local business"]
 
 
-def _canonical_concept(idea: str) -> str:
-    text = idea.lower()
-    if any(word in text for word in ("coffee", "cafe", "café", "espresso")):
-        return "coffee shop"
-    if any(word in text for word in ("grocery", "bodega", "supermarket", "greengrocer")):
-        return "grocery store"
-    if any(word in text for word in ("pizza", "pizzeria")):
-        return "pizza"
-    if any(word in text for word in ("restaurant", "diner", "bistro")):
-        return "restaurant"
-    return ""
+def _content_words(phrase: str) -> list[str]:
+    words = {
+        word
+        for word in re.findall(r"[a-z]+", phrase.lower())
+        if len(word) > 3 and word not in _GENERIC_QUERY_WORDS
+    }
+    return sorted(words, key=lambda word: (-len(word), word))
 
 
 def _location(profile: BusinessProfile, transcript: List[GrillTurn], opening: str = "") -> str:
@@ -518,7 +545,12 @@ def _is_usable_tag(tag: dict) -> bool:
     return not any(marker in blob for marker in _MEDIA_MARKERS)
 
 
-_GENERIC_QUERY_WORDS = {"store", "shop", "place", "local", "business", "food", "with", "from", "market"}
+_GENERIC_QUERY_WORDS = {
+    "store", "shop", "place", "local", "business", "company", "service", "services",
+    "repair", "repairs", "food", "with", "from", "market", "specialty", "special",
+    "neighborhood", "premium", "boxed", "handmade", "handcrafted", "mobile",
+    "custom", "residential", "commercial", "small", "family", "used",
+}
 
 
 _ALIASES = {
@@ -526,6 +558,8 @@ _ALIASES = {
     "cafe": ["coffee", "espresso"],
     "pizza": ["pizzeria"],
     "pizzeria": ["pizza"],
+    "chocolate": ["chocolatier", "confectionery", "candy"],
+    "chocolates": ["chocolate"],
 }
 
 
@@ -541,24 +575,58 @@ def _distinctive_words(phrase: str) -> set[str]:
     return words | extra
 
 
-def _best_tag(groups: list[tuple[str, list[dict]]]) -> Optional[dict]:
-    """The tag whose name matches a concept we actually asked Qloo about."""
-    scores: dict[str, int] = {}
+_FORM_WORDS = {"shop", "store", "cafe", "café", "artisan", "bakery", "contractor", "service"}
+_INDUSTRIAL_MARKERS = ("manufacturer", "wholesaler", "factory", "plant", "industrial")
+_CITY_MILES = 40
+
+
+def _tag_rank(tag: dict, words: set[str]) -> Optional[tuple]:
+    """Higher is a closer category. A shop beats its parent; a contractor beats a supply store."""
+    ident = str(tag.get("id") or "")
+    suffix = ident.rsplit(":", 1)[-1].replace("_", " ")
+    label = f"{tag.get('name', '')} {suffix}".lower()
+    overlap = sum(1 for word in words if word in label)
+    if overlap <= 0:
+        return None
+    extra = [
+        word
+        for word in suffix.split()
+        if not any(wanted in word or word in wanted for wanted in words)
+    ]
+    form = sum(1 for word in extra if word in _FORM_WORDS)
+    unrelated = sum(1 for word in extra if word not in _FORM_WORDS)
+    industrial = 1 if any(marker in suffix for marker in _INDUSTRIAL_MARKERS) else 0
+    return (overlap, form, -unrelated, -industrial)
+
+
+def _ranked_tags(
+    groups: list[tuple[str, list[dict]]],
+    required: Optional[set[str]] = None,
+) -> list[dict]:
+    """Category tags that match the business, closest category first."""
+    ranks: dict[str, tuple] = {}
     chosen: dict[str, dict] = {}
     for phrase, tags in groups:
-        words = _distinctive_words(phrase)
+        words = required or _distinctive_words(phrase)
         for tag in tags:
             ident = str(tag.get("id") or "")
             if not ident or not _is_usable_tag(tag) or not _is_category_place(tag):
                 continue
-            name = f"{tag.get('name', '')} {ident}".lower()
-            score = sum(1 for word in words if word in name)
-            if score > scores.get(ident, 0):
-                scores[ident] = score
+            if required and _tag_rank(tag, required) is None:
+                continue
+            rank = _tag_rank(tag, words)
+            if rank is None:
+                continue
+            if ident not in ranks or rank > ranks[ident]:
+                ranks[ident] = rank
                 chosen[ident] = tag
-    if not scores or max(scores.values()) == 0:
-        return None
-    return chosen[max(scores, key=scores.get)]
+    return [chosen[ident] for ident in sorted(ranks, key=ranks.get, reverse=True)]
+
+
+def _best_tag(groups: list[tuple[str, list[dict]]]) -> Optional[dict]:
+    """The tag whose name matches a concept we actually asked Qloo about."""
+    ranked = _ranked_tags(groups)
+    return ranked[0] if ranked else None
 
 
 def _llm_base(settings: Settings) -> str:
@@ -650,24 +718,123 @@ def _place(item: dict) -> dict:
         if isinstance(tag, dict) and tag.get("name"):
             tag_names.append(str(tag["name"]))
     place_id = item.get("entity_id") or item.get("id") or ""
+    point = item.get("location") if isinstance(item.get("location"), dict) else {}
     return {
         "id": str(place_id),
         "name": str(item.get("name") or "Unnamed place"),
         "detail": str(detail)[:400],
+        "where": _town(item, props),
+        "lat": point.get("lat"),
+        "lon": point.get("lon"),
         "tags": tag_names[:8],
     }
 
 
-def _plain_places(signals: list[dict]) -> str:
-    sentences = []
-    for place in signals[:6]:
-        about = (place.get("detail") or "").strip()
-        if about:
-            sentences.append(f"{place['name']} is described as {about.rstrip('.')}.")
-        else:
-            sentences.append(f"{place['name']} showed up as a match.")
-    return (
-        "Qloo matched these places to the idea. "
-        + " ".join(sentences)
-        + " Treat them as aggregate taste matches, not proof of demand."
+def _town(item: dict, props: dict) -> str:
+    locality = props.get("locality")
+    if isinstance(locality, dict):
+        locality = locality.get("name") or ""
+    if isinstance(locality, str) and locality.strip():
+        return locality.strip()
+    found = re.findall(
+        r"([A-Za-z][A-Za-z .'-]{1,40}),\s*([A-Z]{2})\b",
+        str(item.get("disambiguation") or ""),
     )
+    if not found:
+        return ""
+    town = " ".join(found[-1][0].split()[-3:]).strip(" .")
+    return f"{town}, {found[-1][1]}"
+
+
+def _plain_places(signals: list[dict], location: str = "") -> str:
+    """A short note when the model does not rewrite the place list."""
+    named = []
+    seen = set()
+    for place in signals:
+        name = str(place.get("name") or "").strip()
+        key = name.lower()
+        if not name or key in seen:
+            continue
+        seen.add(key)
+        where = str(place.get("where") or "").strip()
+        named.append(f"{name} in {where}" if where and where.lower() not in name.lower() else name)
+        if len(named) == 4:
+            break
+    area = location or "the area you named"
+    if not named:
+        return (
+            f"Qloo returned no places in {area} for this idea. "
+            "Treat the rest of the brief as based on your answers."
+        )
+    if len(named) == 1:
+        listed = named[0]
+    else:
+        listed = ", ".join(named[:-1]) + f", and {named[-1]}"
+    return (
+        f"The closest Qloo matches near {area} are {listed}. "
+        "These are aggregate taste matches, not proof of demand."
+    )
+
+
+def _resolved_locality(payload: object) -> Optional[dict]:
+    """The place Qloo understood a location query to mean, including its map point."""
+    if not isinstance(payload, dict):
+        return None
+    query = payload.get("query")
+    if not isinstance(query, dict):
+        return None
+    filters = ((query.get("localities") or {}).get("filter") or [])
+    if not filters or not isinstance(filters[0], dict):
+        return None
+    item = filters[0]
+    point = item.get("location") if isinstance(item.get("location"), dict) else {}
+    parts = [part.strip() for part in str(item.get("disambiguation") or "").split(",") if part.strip()]
+    state = parts[-2] if len(parts) >= 3 else ""
+    return {
+        "name": str(item.get("name") or ""),
+        "state": state,
+        "lat": point.get("lat"),
+        "lon": point.get("lon"),
+    }
+
+
+def _is_city(center: Optional[dict]) -> bool:
+    if not center or center.get("lat") is None or center.get("lon") is None:
+        return False
+    name = str(center.get("name") or "").strip().lower()
+    state = str(center.get("state") or "").strip().lower()
+    return bool(name) and name != state
+
+
+def _miles(lat1: float, lon1: float, lat2: object, lon2: object) -> Optional[float]:
+    if lat2 is None or lon2 is None:
+        return None
+    lat1, lon1, lat2, lon2 = map(math.radians, (float(lat1), float(lon1), float(lat2), float(lon2)))
+    dlat, dlon = lat2 - lat1, lon2 - lon1
+    arc = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    return 3958.8 * 2 * math.asin(math.sqrt(arc))
+
+
+def _within_miles(places: list[dict], center: dict, radius: float) -> list[dict]:
+    kept = []
+    for place in places:
+        distance = _miles(center["lat"], center["lon"], place.get("lat"), place.get("lon"))
+        if distance is None or distance > radius:
+            continue
+        near = dict(place)
+        near["miles"] = distance
+        kept.append(near)
+    kept.sort(key=lambda place: place["miles"])
+    return kept
+
+
+def _dedupe_places(places: list[dict]) -> list[dict]:
+    seen = set()
+    unique = []
+    for place in places:
+        key = str(place.get("name") or "").strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(place)
+    return unique[:6]
