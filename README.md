@@ -105,6 +105,10 @@ not present it as such in a public demo.
 - `tests/test_export.py` — Markdown report export.
 - `tests/test_security.py` — rate limit, budgets, CSRF, origin, IP.
 
+## Devpost Learn skills
+
+The Build With AI Basics skill pack lives in `.agents/skills/` (`1-start` through `6-ship`), locked in `skills-lock.json`. `.claude/skills` points at those same folders. Personal learning notes stay out of git via `/devpost/learner-profile.md` in `.gitignore`. Planning docs the pack writes (`devpost/scope.md`, `devpost/prd.md`, `devpost/spec.md`) belong in the repo once they are approved.
+
 ## Plan
 
 `PROJECT_PLAN.md` records the original scope. The pipeline described here —
