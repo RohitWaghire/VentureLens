@@ -5,7 +5,7 @@
     <div class="interview-topline">
       <form method="post" action="/new" class="inline-form">
         <input type="hidden" name="csrf" value="{{ csrf }}">
-        <button type="submit" class="back-link">← <span>New idea</span></button>
+        <button type="submit" class="back-link"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> <span>New idea</span></button>
       </form>
       <span class="session-label"><span class="session-dot" aria-hidden="true"></span> PRIVATE SESSION</span>
     </div>
@@ -42,45 +42,93 @@
     {% endif %}
 
     {% if confirming %}
-      <form class="reply-composer" method="post" action="/grill" data-loading-message="Writing your brief…">
+      <form class="reply-composer grill-dock" method="post" action="/grill" data-loading-message="Writing your brief…">
         <input type="hidden" name="csrf" value="{{ csrf }}">
         <input type="hidden" name="confirm" value="1">
-        <div class="reply-footer">
-          <span class="keyboard-hint">↵ <span>Write the brief</span></span>
-          <button type="submit" class="send-button reply-send" data-default-submit>Write my brief <span class="send-arrow" aria-hidden="true">↗</span></button>
+        <div class="question-card is-emerging">
+          <div class="reply-footer">
+            <span class="keyboard-hint"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 10 4 15l5 5M4 15h10a6 6 0 0 0 0-12h-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> <span>Write the brief</span></span>
+            <button type="submit" class="send-button reply-send" data-default-submit>Write my brief <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          </div>
         </div>
+        <div class="glass-composer" aria-hidden="true"></div>
       </form>
     {% else %}
-      <form class="reply-composer" method="post" action="/grill" data-loading-message="Recording this round…">
+      <form class="reply-composer grill-dock" method="post" action="/grill" data-loading-message="Recording this round…">
         <input type="hidden" name="csrf" value="{{ csrf }}">
         {% for question in questions %}
-          <fieldset class="round-question">
-            <legend class="round-legend">Q{{ loop.index }} · {{ question.text }}</legend>
-            {% if question.recommendation %}
-              <p class="recommendation">Recommended: {{ question.recommendation }}</p>
-            {% endif %}
-            {% if question.options %}
-              <div class="option-set">
-                {% for opt in question.options %}
-                  <label class="option-chip">
-                    <input type="radio" name="a_{{ question.id }}" value="{{ opt.value }}">
-                    <span>{{ opt.label }}</span>
-                  </label>
-                {% endfor %}
+          <fieldset class="round-question"{% if not loop.first %} hidden{% endif %}>
+            <div class="question-card{% if loop.first %} is-emerging{% endif %}">
+              <p class="round-legend">
+                <span class="question-chip">Q{{ loop.index }}</span>
+                <span class="question-copy">{{ question.text }}</span>
+              </p>
+              {% if question.recommendation %}
+                <p class="recommendation sr-only">Recommended: {{ question.recommendation }}</p>
+              {% endif %}
+              {% if question.options %}
+                <div class="option-set">
+                  {% for opt in question.options %}
+                    <label class="option-chip">
+                      <input type="radio" name="a_{{ question.id }}" value="{{ opt.value }}">
+                      <span>{{ opt.label }}{% if question.recommendation == opt.label %} (Recommended){% endif %}</span>
+                    </label>
+                  {% endfor %}
+                </div>
+              {% endif %}
+              <div class="reply-footer">
+                <span class="keyboard-hint"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 10 4 15l5 5M4 15h10a6 6 0 0 0 0-12h-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> <span>Continue when ready</span></span>
+                {% if loop.last %}
+                  <button type="submit" class="send-button reply-send" data-default-submit aria-label="Continue interview">
+                    <span>Continue</span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </button>
+                {% else %}
+                  <button type="button" class="send-button reply-send" data-advance>
+                    <span>Continue</span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </button>
+                {% endif %}
               </div>
-            {% endif %}
-            <label for="t-{{ question.id }}" class="sr-only">Your answer</label>
-            <textarea id="t-{{ question.id }}" name="t_{{ question.id }}" rows="2"
-              placeholder="{{ question.free_text_hint or 'Or type your own answer.' }}"></textarea>
+            </div>
+            <div class="glass-composer">
+              <label for="t-{{ question.id }}" class="sr-only">Your answer</label>
+              <textarea id="t-{{ question.id }}" name="t_{{ question.id }}" rows="2"
+                placeholder="{{ question.free_text_hint or 'Or type your own answer.' }}"></textarea>
+            </div>
           </fieldset>
         {% endfor %}
-        <div class="reply-footer">
-          <span class="keyboard-hint">↵ <span>Continue when ready</span></span>
-          <button type="submit" class="send-button reply-send" data-default-submit aria-label="Continue interview">
-            <span>Continue</span><span class="send-arrow" aria-hidden="true">↗</span>
-          </button>
-        </div>
       </form>
+      <script>
+        (function () {
+          var questions = Array.prototype.slice.call(document.querySelectorAll('.round-question'));
+          if (questions.length < 2) return;
+          var index = 0;
+          function show(next) {
+            index = next;
+            questions.forEach(function (question, i) {
+              question.hidden = i !== index;
+              var card = question.querySelector('.question-card');
+              if (!card || i !== index) return;
+              card.classList.remove('is-emerging');
+              void card.offsetWidth;
+              card.classList.add('is-emerging');
+            });
+          }
+          document.addEventListener('click', function (event) {
+            var button = event.target.closest('[data-advance]');
+            if (!button || index >= questions.length - 1) return;
+            event.preventDefault();
+            show(index + 1);
+          });
+          document.addEventListener('keydown', function (event) {
+            if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+            if (!(event.target instanceof HTMLTextAreaElement)) return;
+            if (!event.target.closest('.round-question') || index >= questions.length - 1) return;
+            event.preventDefault();
+            event.stopPropagation();
+            show(index + 1);
+          }, true);
+        })();
+      </script>
     {% endif %}
   </section>
 {% endblock %}

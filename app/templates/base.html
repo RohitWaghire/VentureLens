@@ -4,20 +4,29 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ app_name }} — {{ tagline }}{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fustat:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 </head>
 <body>
-  <header class="site-header">
-    <a class="brand" href="/" aria-label="{{ app_name }} home"><strong>{{ app_name }}</strong></a>
-    <span class="tagline">{{ tagline }}</span>
-  </header>
-  <main class="container" id="main-content">
-    {% block content %}{% endblock %}
-  </main>
-  <footer class="site-footer">
-    <p>{{ disclosure }}</p>
-  </footer>
+  <div class="page-bg" aria-hidden="true">
+    <video class="page-video" src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260329_050842_be71947f-f16e-4a14-810c-06e83d23ddb5.mp4" autoplay muted playsinline preload="auto" tabindex="-1"></video>
+    <video class="page-video" src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260329_050842_be71947f-f16e-4a14-810c-06e83d23ddb5.mp4" muted playsinline preload="auto" tabindex="-1"></video>
+  </div>
+  <div class="page-frame">
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="{{ app_name }} home"><strong>{{ app_name }}</strong></a>
+      <span class="tagline">{{ tagline }}</span>
+    </header>
+    <main class="container" id="main-content">
+      {% block content %}{% endblock %}
+    </main>
+    <footer class="site-footer">
+      <p>{{ disclosure }}</p>
+    </footer>
+  </div>
 
   <div id="loading" class="loading hidden" role="status" aria-live="polite" aria-atomic="true">
     <div class="spinner" aria-hidden="true"></div>
@@ -47,6 +56,118 @@
         else if (typeof form.requestSubmit === 'function') form.requestSubmit();
         else form.submit();
       });
+
+      var clips = document.querySelectorAll('.page-video');
+      if (clips.length < 2 || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      var front = 0;
+      var blending = false;
+      var layer = 1;
+      var overlap = 1.2;
+
+      function play(video, done) {
+        var pending = video.play();
+        if (pending && pending.then) {
+          pending.then(function () { done(true); }, function () { done(false); });
+          return;
+        }
+        done(true);
+      }
+      function onFrame(video, done) {
+        if (typeof video.requestVideoFrameCallback === 'function') {
+          video.requestVideoFrameCallback(function () { done(); });
+          return;
+        }
+        if (video.readyState >= 2) {
+          done();
+          return;
+        }
+        video.addEventListener('loadeddata', function once() {
+          video.removeEventListener('loadeddata', once);
+          done();
+        });
+      }
+      function fromStart(video, done) {
+        if (video.currentTime < 0.05) {
+          done(true);
+          return;
+        }
+        function onSeek() {
+          video.removeEventListener('seeked', onSeek);
+          done(Math.abs(video.currentTime) < 0.05);
+        }
+        video.addEventListener('seeked', onSeek);
+        try { video.currentTime = 0; }
+        catch (e) {
+          video.removeEventListener('seeked', onSeek);
+          done(false);
+        }
+      }
+      function fadeIn(video, ms, done) {
+        var startedAt = performance.now();
+        video.style.opacity = '0';
+        function tick(now) {
+          var progress = Math.min((now - startedAt) / ms, 1);
+          video.style.opacity = String(1 - Math.pow(1 - progress, 3));
+          if (progress < 1) requestAnimationFrame(tick);
+          else done();
+        }
+        requestAnimationFrame(tick);
+      }
+      function show(video) {
+        onFrame(video, function () { video.style.opacity = '1'; });
+      }
+
+      clips[0].style.zIndex = '1';
+      clips[1].style.zIndex = '0';
+      clips[0].style.opacity = '0';
+      clips[1].style.opacity = '0';
+      play(clips[0], function (ok) { if (ok) show(clips[0]); });
+
+      function handoff() {
+        if (blending) return;
+        var current = clips[front];
+        var incoming = clips[1 - front];
+        blending = true;
+        fromStart(incoming, function (seeked) {
+          if (!seeked) {
+            blending = false;
+            return;
+          }
+          layer += 1;
+          incoming.style.zIndex = String(layer);
+          incoming.style.opacity = '0';
+          current.style.opacity = '1';
+          play(incoming, function (ok) {
+            if (!ok) {
+              blending = false;
+              return;
+            }
+            onFrame(incoming, function () {
+              var left = isFinite(current.duration) ? current.duration - current.currentTime : overlap;
+              fadeIn(incoming, Math.max(0.25, Math.min(overlap, left)) * 1000, function () {
+                current.pause();
+                current.style.opacity = '0';
+                front = 1 - front;
+                blending = false;
+              });
+            });
+          });
+        });
+      }
+      function watch() {
+        requestAnimationFrame(watch);
+        if (blending) return;
+        var current = clips[front];
+        if (!isFinite(current.duration) || current.duration <= 0) return;
+        if (current.ended) {
+          handoff();
+          return;
+        }
+        if (current.paused) return;
+        if (current.duration - current.currentTime > overlap) return;
+        handoff();
+      }
+      requestAnimationFrame(watch);
     })();
   </script>
 </body>
