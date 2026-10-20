@@ -139,6 +139,10 @@ a:hover { color: var(--accent-dark); }
 .user-message-label { font: 500 .55rem 'DM Mono', monospace; letter-spacing: .1em; color: var(--accent); }
 .user-message p { margin: .2rem 0 0; color: #263a32; font-size: .87rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 .interview-demo-note { margin: 0 0 .75rem 3rem; text-align: left; }
+.round-lead { max-width: 560px; margin: .7rem 0 0; color: var(--ink-soft); font-size: .92rem; }
+.round-question { margin: 0 0 1.15rem; padding: 0; border: 0; }
+.round-legend { margin: 0 0 .45rem; font: 600 .95rem/1.35 'Manrope', sans-serif; letter-spacing: -.02em; }
+.recommendation { margin: 0 0 .55rem; color: var(--accent); font-size: .78rem; }
 .reply-composer { margin-left: 3rem; padding: .8rem .95rem .8rem; border-radius: 16px; }
 .reply-composer textarea { min-height: 58px; font-size: .91rem; }
 .reply-footer { padding-top: .55rem; border-top: 0; }

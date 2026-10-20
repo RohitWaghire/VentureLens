@@ -1,11 +1,12 @@
 """Planning session.
 
-Routes learn three outcomes: show the next question, show the report, or stop
-because the budget or a live provider call failed. Question order, the server
-question text, and when a provider call costs a budget unit sit here.
+A round asks every question whose prerequisites are already settled. The
+report waits until that tree is empty and the user confirms the understanding.
 """
 
 from __future__ import annotations
+
+import logging
 
 from app.model import BusinessProfile, GrillTurn
 from app.providers.base import Provider, ProviderError
@@ -13,9 +14,12 @@ from app.security import QueryBudget
 from app.sessions import Session
 
 QUESTION = "question"
+CONFIRM = "confirm"
 REPORT = "report"
 BUDGET = "budget"
 UNAVAILABLE = "unavailable"
+
+log = logging.getLogger(__name__)
 
 
 class Planner:
@@ -33,25 +37,33 @@ class Planner:
         session.report = None
         return QUESTION
 
-    def current_question(self, session: Session):
+    def frontier(self, session: Session):
         profile = session.profile or BusinessProfile()
-        return self.provider.question(profile, session.transcript)
+        return self.provider.frontier(profile, session.transcript)
 
-    def answer(self, session: Session, answer: str, finish: bool) -> str:
-        """Record the server's current question, or finish the brief.
+    def current_question(self, session: Session):
+        ready = self.frontier(session)
+        return ready[0] if ready else None
 
-        The posted question text is ignored. The transcript stores the question
-        this session actually asked.
-        """
-        if not finish and answer:
-            question = self.current_question(session)
-            if question is None:
-                return self.ensure_report(session)
+    def record(self, session: Session, answers: dict[str, str]) -> str:
+        """Store this round's answers. Unanswered frontier questions stay open."""
+        by_id = {question.id: question for question in self.frontier(session)}
+        for question_id, text in answers.items():
+            text = (text or "").strip()
+            question = by_id.get(question_id)
+            if not text or question is None:
+                continue
             session.transcript.append(
-                GrillTurn(question_id=question.id, question=question.text, answer=answer)
+                GrillTurn(question_id=question.id, question=question.text, answer=text)
             )
-            if self.current_question(session) is not None:
-                return QUESTION
+        if self.frontier(session):
+            return QUESTION
+        return CONFIRM
+
+    def confirm(self, session: Session) -> str:
+        """Write the brief only after the tree is settled."""
+        if self.frontier(session):
+            return QUESTION
         return self.ensure_report(session)
 
     def ensure_report(self, session: Session) -> str:
@@ -66,6 +78,7 @@ class Planner:
                 session.opening,
                 session.transcript,
             )
-        except ProviderError:
+        except ProviderError as exc:
+            log.warning("report provider failed: %s", exc)
             return UNAVAILABLE
         return REPORT

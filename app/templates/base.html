@@ -42,7 +42,9 @@
         var form = field.form;
         if (!form || !form.reportValidity()) return;
         e.preventDefault();
-        if (typeof form.requestSubmit === 'function') form.requestSubmit();
+        var submitter = form.querySelector('[data-default-submit]');
+        if (submitter) form.requestSubmit(submitter);
+        else if (typeof form.requestSubmit === 'function') form.requestSubmit();
         else form.submit();
       });
     })();

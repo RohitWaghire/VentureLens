@@ -10,6 +10,8 @@ The HTTP transport is injected so tests can exercise this adapter with no networ
 from __future__ import annotations
 
 import json
+import logging
+import re
 import socket
 import urllib.error
 import urllib.parse
@@ -17,9 +19,11 @@ import urllib.request
 from typing import Callable, List, Optional
 
 from app.config import Settings
-from app.model import BusinessProfile, GrillTurn, Report, ReportSection
+from app.model import BusinessProfile, GrillOption, GrillQuestion, GrillTurn, Report, ReportSection
 from app.providers.base import Provider, ProviderError
 from app.providers.grilling import answers_report
+
+log = logging.getLogger(__name__)
 
 Fetch = Callable[[str, str, dict, Optional[bytes], float], tuple[int, bytes]]
 
@@ -60,6 +64,29 @@ class LiveProvider(Provider):
     def __init__(self, settings: Settings, fetch: Fetch = urllib_fetch) -> None:
         self.settings = settings
         self.fetch = fetch
+        self._frontier_cache: dict = {}
+
+    def frontier(self, profile: BusinessProfile, transcript: List[GrillTurn]) -> List[GrillQuestion]:
+        """Questions that are specific to this idea, not a shared checklist."""
+        key = (
+            profile.idea,
+            profile.region,
+            profile.budget,
+            tuple((turn.question_id, turn.answer) for turn in transcript),
+        )
+        cached = self._frontier_cache.get(key)
+        if cached is not None:
+            return cached
+        if len(transcript) >= 8:
+            questions: List[GrillQuestion] = []
+        else:
+            generated = self._questions_for_idea(profile, transcript)
+            if generated is None or (not generated and not transcript):
+                questions = super().frontier(profile, transcript)
+            else:
+                questions = generated
+        self._frontier_cache[key] = questions
+        return questions
 
     def write_report(
         self,
@@ -67,7 +94,7 @@ class LiveProvider(Provider):
         opening: str,
         transcript: List[GrillTurn],
     ) -> Report:
-        signals = self._taste(profile)
+        signals = self._taste(profile, transcript, opening)
         narrative = self._narrate(profile, opening, transcript, signals)
         report = narrative or answers_report(profile, transcript)
         report.sections = [
@@ -79,20 +106,23 @@ class LiveProvider(Provider):
         report.caveat = _CAVEAT
         return report
 
-    def _taste(self, profile: BusinessProfile) -> list[dict]:
+    def _taste(self, profile: BusinessProfile, transcript: List[GrillTurn], opening: str = "") -> list[dict]:
         if not self.settings.qloo_api_key:
             raise ProviderError("Set VL_QLOO_API_KEY before using the live provider.")
-        idea = (profile.idea or "local business").strip()
-        tag_ids = self._tag_ids(idea)
+        phrases = _search_phrases(profile, transcript, opening)
+        location = _location(profile, transcript, opening)
+        self._qloo_down = False
+        tag = _best_tag([(phrase, self._tags_for(phrase)) for phrase in phrases])
+        if tag is None or self._qloo_down:
+            return []
         params = {
             "filter.type": "urn:entity:place",
             "take": "8",
+            "filter.tags": tag["id"],
         }
-        if profile.region:
-            params["filter.location.query"] = profile.region
-        if tag_ids:
-            params["signal.interests.tags"] = ",".join(tag_ids)
-        status, payload = self._qloo_get("/v2/insights", params)
+        if location:
+            params["filter.location.query"] = location
+        status, payload = self._qloo_get("/v2/insights", params, timeout=60)
         if status in (401, 403):
             raise ProviderError(
                 "Qloo refused the request. Use a hackathon key with "
@@ -100,56 +130,126 @@ class LiveProvider(Provider):
             )
         if status == 429:
             raise ProviderError("Qloo rate limit reached. Try again shortly.")
-        entities = _entities(payload) if status == 200 else []
-        if entities:
-            return entities
-        return self._search_places(idea, profile.region)
-
-    def _tag_ids(self, idea: str) -> list[str]:
-        status, payload = self._qloo_get("/v2/tags", {"filter.query": idea[:80], "take": "5"})
         if status != 200:
             return []
-        tags = _tags(payload)
-        return [tag["id"] for tag in tags if tag.get("id")][:5]
+        return _entities(payload)
 
-    def _search_places(self, idea: str, region: str) -> list[dict]:
-        query = f"{idea} {region}".strip()
+    def _tags_for(self, phrase: str) -> list[dict]:
+        if getattr(self, "_qloo_down", False):
+            return []
         status, payload = self._qloo_get(
-            "/search",
-            {"query": query[:120], "types": "urn:entity:place", "take": "5"},
+            "/v2/tags",
+            {"filter.query": phrase[:80], "take": "8"},
         )
-        if status == 404 or status != 200:
-            return []
-        found = _entities(payload) or _search_hits(payload)
-        if not found:
-            return []
-        ids = [item["id"] for item in found if item.get("id")]
-        if not ids:
-            return found
-        params = {
-            "filter.type": "urn:entity:place",
-            "signal.interests.entities": ",".join(ids[:5]),
-            "take": "8",
-        }
-        if region:
-            params["filter.location.query"] = region
-        status, payload = self._qloo_get("/v2/insights", params)
         if status != 200:
-            return found
-        insights = _entities(payload)
-        return insights or found
+            return []
+        return _tags(payload)
 
-    def _qloo_get(self, path: str, params: dict) -> tuple[int, object]:
+    def _qloo_get(self, path: str, params: dict, timeout: float | None = None) -> tuple[int, object]:
         base = self.settings.qloo_base_url.rstrip("/")
         url = f"{base}{path}?{urllib.parse.urlencode(params)}"
-        status, raw = self.fetch(
-            "GET",
-            url,
-            {"X-Api-Key": self.settings.qloo_api_key, "Accept": "application/json"},
-            None,
-            self.settings.qloo_timeout_seconds,
-        )
+        try:
+            status, raw = self.fetch(
+                "GET",
+                url,
+                {"X-Api-Key": self.settings.qloo_api_key, "Accept": "application/json"},
+                None,
+                timeout or self.settings.qloo_timeout_seconds,
+            )
+        except ProviderError:
+            log.warning("qloo request failed for %s", path)
+            self._qloo_down = True
+            return 0, None
         return status, _json_bytes(raw)
+
+    def _questions_for_idea(
+        self,
+        profile: BusinessProfile,
+        transcript: List[GrillTurn],
+    ) -> Optional[List[GrillQuestion]]:
+        parsed = self._chat(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are grilling a founder about one specific business. "
+                        "Return JSON {\"questions\": [{\"id\", \"text\", \"options\", \"recommendation\"}]}. "
+                        "Ask 3 questions that can be decided from what is already known. "
+                        "Each question must be specific to this business. A grocery shop, a yoga studio, "
+                        "and a coffee shop must not receive the same questions. "
+                        "Do not repeat a topic already answered. Do not ask a question whose answer "
+                        "depends on something still open. Options are 3 to 5 short choices. "
+                        "recommendation is one of those options. "
+                        "If nothing material is left to decide, return {\"questions\": []}."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "idea": profile.idea,
+                            "region": profile.region,
+                            "budget": profile.budget,
+                            "answered": [
+                                {"question": turn.question, "answer": turn.answer}
+                                for turn in transcript
+                            ],
+                        }
+                    ),
+                },
+            ]
+        )
+        if not parsed or not isinstance(parsed.get("questions"), list):
+            return None
+        asked = {turn.question.strip().lower() for turn in transcript}
+        asked_ids = {turn.question_id for turn in transcript}
+        questions = []
+        for item in parsed["questions"][:4]:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text") or "").strip()
+            options = [str(option).strip() for option in item.get("options") or [] if str(option).strip()]
+            if not text or text.lower() in asked or len(options) < 2:
+                continue
+            question_id = str(item.get("id") or f"q{len(questions) + 1}").strip()[:40]
+            if question_id in asked_ids:
+                continue
+            recommendation = str(item.get("recommendation") or options[0]).strip()
+            if recommendation not in options:
+                recommendation = options[0]
+            questions.append(
+                GrillQuestion(
+                    id=question_id,
+                    text=text[:240],
+                    options=[GrillOption(label=option, value=option) for option in options[:5]],
+                    recommendation=recommendation,
+                )
+            )
+            asked.add(text.lower())
+            asked_ids.add(question_id)
+        return questions
+
+    def _chat(self, messages: list) -> Optional[dict]:
+        if not self.settings.llm_api_key or not self.settings.llm_model:
+            return None
+        body = json.dumps(_chat_payload(self.settings.llm_model, messages)).encode()
+        try:
+            status, raw = self.fetch(
+                "POST",
+                f"{_llm_base(self.settings)}/chat/completions",
+                {
+                    "Authorization": f"Bearer {self.settings.llm_api_key}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                body,
+                self.settings.llm_timeout_seconds,
+            )
+        except ProviderError:
+            return None
+        if status != 200:
+            return None
+        return _parse_json_object(_message_content(_json_bytes(raw)))
 
     def _narrate(
         self,
@@ -249,6 +349,143 @@ def _chat_payload(model: str, messages: list) -> dict:
     return payload
 
 
+def _search_phrases(
+    profile: BusinessProfile,
+    transcript: List[GrillTurn],
+    opening: str = "",
+) -> list[str]:
+    """Concepts worth resolving to a Qloo tag. Place answers are not concepts."""
+    idea = (profile.idea or opening or "").strip()
+    phrases = []
+    canonical = _canonical_concept(idea)
+    if canonical:
+        phrases.append(canonical)
+    if canonical == "coffee shop":
+        phrases.append("cafe")
+    if idea and idea.lower() not in {phrase.lower() for phrase in phrases}:
+        phrases.append(idea)
+    for turn in transcript:
+        question = turn.question.lower()
+        answer = (turn.answer or "").strip()
+        if not answer or answer.lower() in _GENERIC_ANSWERS:
+            continue
+        if any(word in question for word in ("where", "city", "neighborhood", "location", "budget", "when", "team")):
+            continue
+        if answer.lower() not in {phrase.lower() for phrase in phrases}:
+            phrases.append(answer)
+    return phrases[:3] or ["local business"]
+
+
+def _canonical_concept(idea: str) -> str:
+    text = idea.lower()
+    if any(word in text for word in ("coffee", "cafe", "café", "espresso")):
+        return "coffee shop"
+    if any(word in text for word in ("grocery", "bodega", "supermarket", "greengrocer")):
+        return "grocery store"
+    if any(word in text for word in ("pizza", "pizzeria")):
+        return "pizza"
+    if any(word in text for word in ("restaurant", "diner", "bistro")):
+        return "restaurant"
+    return ""
+
+
+def _location(profile: BusinessProfile, transcript: List[GrillTurn], opening: str = "") -> str:
+    if (profile.region or "").strip():
+        return profile.region.strip()
+    from app.providers.grilling import extract_opening
+
+    stated = extract_opening(opening).region
+    if stated:
+        return stated
+    for turn in transcript:
+        question = turn.question.lower()
+        answer = (turn.answer or "").strip()
+        if not answer or answer.lower() in _GENERIC_ANSWERS:
+            continue
+        if any(word in question for word in ("where", "city", "neighborhood", "location", "area")):
+            parsed = extract_opening(f"shop in {answer}").region
+            return parsed or answer
+    return ""
+
+
+_GENERIC_ANSWERS = {
+    "one city / metro",
+    "multiple cities",
+    "not decided yet",
+    "lean and focused",
+    "premium / specialty",
+    "family-friendly",
+    "local community anchor",
+    "nothing else",
+    "i have specifics i'll type",
+}
+
+
+_MEDIA_MARKERS = (
+    ":media:",
+    ":movie:",
+    ":music:",
+    ":artist:",
+    ":book:",
+    ":tv",
+    ":podcast:",
+    ":video_game:",
+    ":brand:",
+    ":person:",
+)
+
+
+def _is_usable_tag(tag: dict) -> bool:
+    ident = str(tag.get("id") or "")
+    if not ident.startswith("urn:tag:"):
+        return False
+    blob = f"{ident} {tag.get('type', '')}".lower()
+    return not any(marker in blob for marker in _MEDIA_MARKERS)
+
+
+_GENERIC_QUERY_WORDS = {"store", "shop", "place", "local", "business", "food", "with", "from", "market"}
+
+
+_ALIASES = {
+    "coffee": ["cafe", "café", "espresso", "coffeehouse"],
+    "cafe": ["coffee", "espresso"],
+    "pizza": ["pizzeria"],
+    "pizzeria": ["pizza"],
+}
+
+
+def _distinctive_words(phrase: str) -> set[str]:
+    words = {
+        word
+        for word in re.findall(r"[a-z]+", phrase.lower())
+        if len(word) > 3 and word not in _GENERIC_QUERY_WORDS
+    }
+    extra = set()
+    for word in words:
+        extra.update(_ALIASES.get(word, []))
+    return words | extra
+
+
+def _best_tag(groups: list[tuple[str, list[dict]]]) -> Optional[dict]:
+    """The tag whose name matches a concept we actually asked Qloo about."""
+    scores: dict[str, int] = {}
+    chosen: dict[str, dict] = {}
+    for phrase, tags in groups:
+        words = _distinctive_words(phrase)
+        for tag in tags:
+            ident = str(tag.get("id") or "")
+            if not ident or not _is_usable_tag(tag):
+                continue
+            name = f"{tag.get('name', '')} {ident}".lower()
+            score = sum(1 for word in words if word in name)
+            if score > scores.get(ident, 0):
+                scores[ident] = score
+                chosen[ident] = tag
+    if not scores or max(scores.values()) == 0:
+        return None
+    return chosen[max(scores, key=scores.get)]
+
+
 def _llm_base(settings: Settings) -> str:
     configured = getattr(settings, "llm_base_url", "") or ""
     if configured.strip():
@@ -309,7 +546,8 @@ def _tags(payload: object) -> list[dict]:
         if not isinstance(item, dict):
             continue
         tag_id = item.get("id") or item.get("tag_id") or ""
-        tags.append({"id": str(tag_id), "name": str(item.get("name") or "")})
+        kind = item.get("type") or item.get("subtype") or ""
+        tags.append({"id": str(tag_id), "name": str(item.get("name") or ""), "type": str(kind)})
     return tags
 
 
@@ -321,15 +559,6 @@ def _entities(payload: object) -> list[dict]:
     elif isinstance(results, list):
         raw = results
     return [_place(item) for item in raw if isinstance(item, dict)]
-
-
-def _search_hits(payload: object) -> list[dict]:
-    if not isinstance(payload, dict):
-        return []
-    raw = payload.get("results")
-    if isinstance(raw, list):
-        return [_place(item) for item in raw if isinstance(item, dict)]
-    return []
 
 
 def _results(payload: object):

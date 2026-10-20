@@ -37,8 +37,10 @@ class TestGrilling:
             data={"prompt": "I have $250k and want to open a specialty coffee shop in Illinois.", "csrf": token},
         )
         r = client.get("/grill")
-        # Budget and region were already stated, so grilling moves to the next.
         assert "When would you hope to launch?" in r.text
+        assert "Who is your primary customer" in r.text
+        assert "What's your approximate start-up budget?" not in r.text
+        assert "Recommended:" in r.text
         assert "PLANNING GUIDE" in r.text
 
     def test_answers_advance_question_and_keep_transcript(self, client):
@@ -47,30 +49,48 @@ class TestGrilling:
         token = csrf_for(client)
         client.post(
             "/grill",
-            data={
-                "csrf": token,
-                "qid": "budget",
-                "qtext": "What's your approximate start-up budget?",
-                "answer": "How much budget? Under $150k",
-            },
+            data={"csrf": token, "a_budget": "Under $150k"},
         )
         r = client.get("/grill")
         assert "Under $150k" in r.text
-        assert "When would you hope to launch?" in r.text  # next dynamic question
+        assert "When would you hope to launch?" in r.text
 
     def test_grill_offer_options_derived_from_prompt(self, client):
         token = csrf_for(client)
         client.post("/start", data={"prompt": "coffee shop", "csrf": token})
         r = client.get("/grill")
-        assert 'type="radio" name="answer"' in r.text
+        assert 'type="radio" name="a_budget"' in r.text
         assert "Under $50k" in r.text
 
-    def test_finish_after_answers_produces_report(self, client):
+    def test_confirm_after_the_tree_produces_report(self, client):
         token = csrf_for(client)
         client.post("/start", data={"prompt": "coffee shop", "csrf": token})
-        token = csrf_for(client)
-        client.post("/grill", data={"csrf": token, "qid": "budget", "qtext": "Q", "answer": "Under $150k"})
-        client.post("/grill", data={"csrf": token, "finish": "1"})
+        token = csrf_for(client, "/grill")
+        client.post(
+            "/grill",
+            data={
+                "csrf": token,
+                "a_budget": "Under $150k",
+                "a_timeline": "Within 6 months",
+                "a_audience": "Local regulars",
+                "a_concept": "Lean and focused",
+                "a_location": "One city / metro",
+                "a_team": "Just me",
+            },
+        )
+        token = csrf_for(client, "/grill")
+        client.post(
+            "/grill",
+            data={
+                "csrf": token,
+                "a_coffee_position": "Espresso bar",
+                "a_open_questions": "Nothing else",
+            },
+        )
+        token = csrf_for(client, "/grill")
+        page = client.get("/grill")
+        assert "Does this match what you mean?" in page.text
+        client.post("/grill", data={"csrf": token, "confirm": "1"})
         r = client.get("/report")
         assert "Business brief" in r.text
         assert "Under $150k" in r.text
@@ -103,6 +123,6 @@ class TestQueryBudget:
             token = csrf_for(client)
             client.post("/start", data={"prompt": "coffee shop", "csrf": token})  # consumes budget
             token = csrf_for(client)
-            client.post("/grill", data={"csrf": token, "finish": "1"})  # report needs budget -> blocked
+            client.post("/grill", data={"csrf": token, "confirm": "1"})  # report needs budget -> blocked
             r = client.get("/report")
             assert "research allowance" in r.text

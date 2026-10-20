@@ -52,8 +52,8 @@ class TestDynamicQuestions:
             GrillTurn(question_id="audience", question="Q3", answer="ok"),
             GrillTurn(question_id="concept", question="Q4", answer="ok"),
         ]
-        q = P.question(profile, turns)
-        assert q.id == "coffee_position"
+        ids = [q.id for q in P.frontier(profile, turns)]
+        assert ids[0] == "coffee_position"
 
     def test_restaurant_prompt_surfaces_restaurant_specific_question(self):
         profile = BusinessProfile(idea="a neighborhood pizzeria")

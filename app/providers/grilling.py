@@ -25,8 +25,13 @@ _CAFE_KEYWORDS = ("coffee", "café", "cafe", "espresso", "bakery")
 _RESTAURANT_KEYWORDS = ("restaurant", "kitchen", "diner", "bistro", "pizzeria", "food hall")
 
 
+_GROCERY_KEYWORDS = ("grocery", "bodega", "supermarket", "greengrocer", "food shop")
+
+
 def _category(idea: str) -> Optional[str]:
     text = (idea or "").lower()
+    if any(k in text for k in _GROCERY_KEYWORDS):
+        return "grocery"
     if any(k in text for k in _CAFE_KEYWORDS):
         return "cafe"
     if any(k in text for k in _RESTAURANT_KEYWORDS):
@@ -44,18 +49,24 @@ _POOL: List[Dict] = [
         "free_text_hint": "Enter a specific amount if you prefer.",
         "skip_field": "budget",
         "category": None,
+        "depends_on": [],
+        "recommendation": "$50k–$150k",
     },
     {
         "id": "timeline",
         "text": "When would you hope to launch?",
         "options": ["Within 6 months", "6–12 months", "Longer term / TBD"],
         "category": None,
+        "depends_on": [],
+        "recommendation": "6–12 months",
     },
     {
         "id": "audience",
         "text": "Who is your primary customer or audience?",
         "options": ["Young professionals", "Students", "Families", "Tourists", "Local regulars"],
         "category": None,
+        "depends_on": [],
+        "recommendation": "Local regulars",
     },
     {
         "id": "concept",
@@ -63,18 +74,40 @@ _POOL: List[Dict] = [
         "options": ["Lean and focused", "Premium / specialty", "Family-friendly", "Local community anchor"],
         "free_text_hint": "Describe your concept in your own words.",
         "category": None,
+        "depends_on": [],
+        "recommendation": "Lean and focused",
     },
     {
         "id": "coffee_position",
         "text": "How do you want to position the coffee program?",
         "options": ["Specialty pour-over", "Espresso bar", "Bakery + coffee", "Drive-thru / quick stop"],
         "category": "cafe",
+        "depends_on": ["concept"],
+        "recommendation": "Espresso bar",
     },
     {
         "id": "cuisine",
         "text": "What style are you most drawn to?",
         "options": ["Classic & approachable", "Seasonal / modern", "Comfort food", "International"],
         "category": "restaurant",
+        "depends_on": ["concept"],
+        "recommendation": "Classic & approachable",
+    },
+    {
+        "id": "grocery_format",
+        "text": "What kind of grocery shop is this?",
+        "options": ["Neighborhood market", "Specialty / gourmet", "Convenience", "Full supermarket"],
+        "category": "grocery",
+        "depends_on": ["concept"],
+        "recommendation": "Neighborhood market",
+    },
+    {
+        "id": "assortment",
+        "text": "What should the shop be known for?",
+        "options": ["Fresh produce", "Prepared food", "Pantry staples", "A tight specialty selection"],
+        "category": "grocery",
+        "depends_on": ["grocery_format"],
+        "recommendation": "Fresh produce",
     },
     {
         "id": "location",
@@ -83,12 +116,16 @@ _POOL: List[Dict] = [
         "free_text_hint": "e.g. a specific city or state.",
         "skip_field": "region",
         "category": None,
+        "depends_on": [],
+        "recommendation": "One city / metro",
     },
     {
         "id": "team",
         "text": "How many people will run it at launch?",
         "options": ["Just me", "2–3", "4+"],
         "category": None,
+        "depends_on": [],
+        "recommendation": "2–3",
     },
     {
         "id": "open_questions",
@@ -96,16 +133,22 @@ _POOL: List[Dict] = [
         "options": ["Nothing else", "I have specifics I'll type"],
         "free_text_hint": "Add anything you'd like captured.",
         "category": None,
+        "depends_on": ["timeline", "audience", "concept", "team"],
+        "recommendation": "Nothing else",
     },
 ]
 
 
-def _to_question(pool_item: Dict) -> GrillQuestion:
+def _to_question(pool_item: Dict, profile: BusinessProfile) -> GrillQuestion:
+    recommendation = pool_item.get("recommendation", "")
+    if pool_item["id"] == "coffee_position" and "specialty" in (profile.idea or "").lower():
+        recommendation = "Specialty pour-over"
     return GrillQuestion(
         id=pool_item["id"],
         text=pool_item["text"],
         options=[GrillOption(label=o, value=o) for o in pool_item["options"]],
         free_text_hint=pool_item.get("free_text_hint", ""),
+        recommendation=recommendation,
     )
 
 
@@ -124,10 +167,13 @@ def extract_opening(text: str) -> BusinessProfile:
             profile.region = name
             break
     if not profile.region:
-        for metro in data.KNOWN_METROS:
-            if metro in low:
-                profile.region = metro.title()
-                break
+        if re.search(r"\bnyc\b", low) or "new york city" in low:
+            profile.region = "New York"
+        else:
+            for metro in data.KNOWN_METROS:
+                if metro in low:
+                    profile.region = metro.title()
+                    break
     idea_raw = None
     for phrase in ("open a ", "launch a ", "start a "):
         if phrase in low:
@@ -140,20 +186,41 @@ def extract_opening(text: str) -> BusinessProfile:
     return profile
 
 
-def next_question(profile: BusinessProfile, transcript: List[GrillTurn]) -> Optional[GrillQuestion]:
-    """Return the next unanswered question, or None when the pool is exhausted."""
-    answered = [turn.question_id for turn in transcript]
+def _applicable(profile: BusinessProfile) -> List[Dict]:
     cat = _category(profile.idea)
-    for item in _POOL:
+    return [
+        item for item in _POOL
+        if item["category"] is None or item["category"] == cat
+    ]
+
+
+def frontier(profile: BusinessProfile, transcript: List[GrillTurn]) -> List[GrillQuestion]:
+    """Questions whose prerequisites are already settled.
+
+    A round asks this whole list. A question that still depends on an open
+    answer waits for a later round.
+    """
+    answered = {turn.question_id for turn in transcript}
+    applicable = _applicable(profile)
+    applicable_ids = {item["id"] for item in applicable}
+    ready = []
+    for item in applicable:
         if item["id"] in answered:
-            continue
-        if item["category"] is not None and item["category"] != cat:
             continue
         skip_field = item.get("skip_field")
         if skip_field and getattr(profile, skip_field, "").strip():
             continue
-        return _to_question(item)
-    return None
+        deps = [dep for dep in item.get("depends_on", []) if dep in applicable_ids]
+        if any(dep not in answered for dep in deps):
+            continue
+        ready.append(_to_question(item, profile))
+    return ready
+
+
+def next_question(profile: BusinessProfile, transcript: List[GrillTurn]) -> Optional[GrillQuestion]:
+    """Return the first frontier question, or None when the tree is settled."""
+    ready = frontier(profile, transcript)
+    return ready[0] if ready else None
 
 
 def answers_report(profile: BusinessProfile, transcript: List[GrillTurn]) -> Report:

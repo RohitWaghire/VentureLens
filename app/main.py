@@ -19,7 +19,7 @@ from fastapi.templating import Jinja2Templates
 
 from app import markdown
 from app.config import Settings, get_settings
-from app.planning import BUDGET, QUESTION, REPORT, UNAVAILABLE, Planner
+from app.planning import BUDGET, CONFIRM, QUESTION, REPORT, UNAVAILABLE, Planner
 from app.providers import get_provider
 from app.security import RateLimiter, QueryBudget, client_ip, csrf_token, verify_csrf, origin_allowed
 from app.sessions import SessionStore
@@ -100,7 +100,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return RedirectResponse("/error?reason=budget", status_code=303)
         if kind == UNAVAILABLE:
             return RedirectResponse("/error?reason=provider", status_code=303)
-        if kind == QUESTION:
+        if kind == QUESTION or kind == CONFIRM:
             return RedirectResponse("/grill", status_code=303)
         return RedirectResponse("/report", status_code=303)
 
@@ -138,38 +138,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return RedirectResponse("/", status_code=303)
         if session.report is not None:
             return RedirectResponse("/report", status_code=303)
-        question = planner.current_question(session)
-        if question is None:
-            return redirect_for(planner.ensure_report(session))
+        questions = planner.frontier(session)
+        if not questions:
+            return templates.TemplateResponse(
+                request,
+                "grill.html",
+                ctx(request, session, questions=[], confirming=True, transcript=session.transcript),
+            )
         return templates.TemplateResponse(
             request,
             "grill.html",
             ctx(
                 request,
                 session,
-                question=question,
+                questions=questions,
+                confirming=False,
                 transcript=session.transcript,
-                profile=session.profile,
             ),
         )
 
     @app.post("/grill", response_class=HTMLResponse)
-    def grill_submit(
-        request: Request,
-        csrf: str = Form(...),
-        qid: str = Form(""),
-        qtext: str = Form(""),
-        answer: str = Form(""),
-        freetext: str = Form(""),
-        finish: str = Form(""),
-    ):
+    async def grill_submit(request: Request, csrf: str = Form(...), confirm: str = Form("")):
         session = session_only(request)
         if session is None:
             return RedirectResponse("/", status_code=303)
         if not valid_form_token(session, csrf):
             return PlainTextResponse("Invalid session token. Refresh and try again.", status_code=403)
-        answer = (answer or "").strip() or (freetext or "").strip()
-        return redirect_for(planner.answer(session, answer, finish == "1"))
+        if confirm == "1":
+            return redirect_for(planner.confirm(session))
+        form = await request.form()
+        answers = {}
+        for question in planner.frontier(session):
+            typed = str(form.get(f"t_{question.id}") or "").strip()
+            picked = str(form.get(f"a_{question.id}") or "").strip()
+            answers[question.id] = typed or picked
+        return redirect_for(planner.record(session, answers))
 
     # --- report --------------------------------------------------------------
     @app.get("/report", response_class=HTMLResponse)

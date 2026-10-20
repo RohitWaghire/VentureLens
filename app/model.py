@@ -37,6 +37,7 @@ class GrillQuestion(BaseModel):
     text: str
     options: List[GrillOption] = Field(default_factory=list)
     free_text_hint: str = ""
+    recommendation: str = ""
 
 
 class GrillTurn(BaseModel):

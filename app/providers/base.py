@@ -32,8 +32,17 @@ class Provider:
         profile: BusinessProfile,
         transcript: List[GrillTurn],
     ) -> GrillQuestion | None:
-        """Return the next grilling question, or None when grilling is done."""
-        return grilling.next_question(profile, transcript)
+        """Return the first frontier question, or None when the tree is settled."""
+        ready = self.frontier(profile, transcript)
+        return ready[0] if ready else None
+
+    def frontier(
+        self,
+        profile: BusinessProfile,
+        transcript: List[GrillTurn],
+    ) -> List[GrillQuestion]:
+        """Every question that can be asked now, given the answers so far."""
+        return grilling.frontier(profile, transcript)
 
     def write_report(
         self,

@@ -50,17 +50,14 @@ def csrf_for(client, path: str = "/") -> str:
     return match.group(1)
 
 
-def answer_grill(client, csrf: str, qid: str, qtext: str, answer: str):
-    client.post(
-        "/grill",
-        data={"csrf": csrf, "qid": qid, "qtext": qtext, "answer": answer},
-    )
+def answer_grill(client, csrf: str, answers: dict):
+    client.post("/grill", data={"csrf": csrf, **answers})
 
 
 @pytest.fixture
 def flow(client):
-    """A session driven through two grill answers to the report page."""
-    client.get("/")  # create session + cookie
+    """A coffee-shop session through both rounds and the confirmation."""
+    client.get("/")
     csrf = csrf_for(client)
     client.post(
         "/start",
@@ -69,8 +66,26 @@ def flow(client):
             "csrf": csrf,
         },
     )
-    csrf = csrf_for(client)  # /start swapped to a fresh session
-    answer_grill(client, csrf, "timeline", "When would you hope to launch?", "Within 6 months")
-    answer_grill(client, csrf, "audience", "Who is your primary customer or audience?", "Young professionals")
-    client.post("/grill", data={"csrf": csrf, "finish": "1"})
+    csrf = csrf_for(client, "/grill")
+    answer_grill(
+        client,
+        csrf,
+        {
+            "a_timeline": "Within 6 months",
+            "a_audience": "Young professionals",
+            "a_concept": "Premium / specialty",
+            "a_team": "2–3",
+        },
+    )
+    csrf = csrf_for(client, "/grill")
+    answer_grill(
+        client,
+        csrf,
+        {
+            "a_coffee_position": "Specialty pour-over",
+            "a_open_questions": "Nothing else",
+        },
+    )
+    csrf = csrf_for(client, "/grill")
+    client.post("/grill", data={"csrf": csrf, "confirm": "1"})
     return client
