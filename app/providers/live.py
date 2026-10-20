@@ -100,9 +100,9 @@ class LiveProvider(Provider):
         report.sections = [
             section
             for section in report.sections
-            if section.heading.strip().lower() != "taste signals"
+            if section.heading.strip().lower() not in {"taste signals", "what similar places suggest"}
         ]
-        report.sections.append(_taste_section(signals))
+        report.sections.append(self._readable_places(profile, signals))
         report.caveat = _CAVEAT
         return report
 
@@ -115,13 +115,7 @@ class LiveProvider(Provider):
         tag = _best_tag([(phrase, self._tags_for(phrase)) for phrase in phrases])
         if tag is None or self._qloo_down:
             return []
-        params = {
-            "filter.type": "urn:entity:place",
-            "take": "8",
-            "filter.tags": tag["id"],
-        }
-        if location:
-            params["filter.location.query"] = location
+        params = place_insights_params(tag["id"], location)
         status, payload = self._qloo_get("/v2/insights", params, timeout=60)
         if status in (401, 403):
             raise ProviderError(
@@ -146,6 +140,8 @@ class LiveProvider(Provider):
         return _tags(payload)
 
     def _qloo_get(self, path: str, params: dict, timeout: float | None = None) -> tuple[int, object]:
+        if path.startswith("/v2/insights"):
+            _reject_bad_insights(params)
         base = self.settings.qloo_base_url.rstrip("/")
         url = f"{base}{path}?{urllib.parse.urlencode(params)}"
         try:
@@ -229,6 +225,52 @@ class LiveProvider(Provider):
             asked_ids.add(question_id)
         return questions
 
+    def _readable_places(self, profile: BusinessProfile, signals: list[dict]) -> ReportSection:
+        """Ask the model to turn raw Qloo places into a short founder note."""
+        heading = "What similar places suggest"
+        if not signals:
+            return ReportSection(
+                heading=heading,
+                body=(
+                    "Qloo returned no place affinities for this idea and location. "
+                    "Treat the rest of the brief as based on your answers."
+                ),
+            )
+        parsed = self._chat(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "Turn Qloo place results into a short note a founder can read. "
+                        "Return JSON {\"body\": \"...\"}. Write 2 to 4 plain sentences. "
+                        "Name the places and say what they have in common for this business. "
+                        "Do not list tags, scores, age ranges, or payment methods. "
+                        "Do not invent places that are not in the list. "
+                        "These are aggregate taste matches, not proof of demand."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "business": profile.idea,
+                            "region": profile.region,
+                            "places": [
+                                {"name": place["name"], "about": place.get("detail") or ""}
+                                for place in signals[:8]
+                            ],
+                        }
+                    ),
+                },
+            ]
+        )
+        body = ""
+        if isinstance(parsed, dict):
+            body = str(parsed.get("body") or "").strip()
+        if not body:
+            body = _plain_places(signals)
+        return ReportSection(heading=heading, body=body)
+
     def _chat(self, messages: list) -> Optional[dict]:
         if not self.settings.llm_api_key or not self.settings.llm_model:
             return None
@@ -272,7 +314,7 @@ class LiveProvider(Provider):
                         "signals in the user message. Do not invent places, scores, "
                         "or demand. Call anything beyond those inputs an assumption. "
                         "Qloo signals are aggregate taste, not proof of profit. "
-                        "Do not add a Taste signals section."
+                        "Do not add a section titled Taste signals or What similar places suggest."
                     ),
                 },
                 {
@@ -435,6 +477,39 @@ _MEDIA_MARKERS = (
 )
 
 
+def place_insights_params(tag_id: str, location: str) -> dict:
+    """The only place-insights request this app sends.
+
+    ``filter.tags`` keeps places of that category. An interest signal asks which
+    other places fans of the tag like, which is a different question.
+    """
+    if not str(tag_id).startswith("urn:tag:category:place:"):
+        raise ValueError("place insights require a category place tag")
+    params = {
+        "filter.type": "urn:entity:place",
+        "take": "8",
+        "filter.tags": tag_id,
+    }
+    if location:
+        params["filter.location.query"] = location
+    return params
+
+
+def _reject_bad_insights(params: dict) -> None:
+    if any(key.startswith("signal.interests") for key in params):
+        raise ProviderError(
+            "Place insights filter by category. Do not send an interest signal."
+        )
+    if not str(params.get("filter.tags") or "").startswith("urn:tag:category:place:"):
+        raise ProviderError("Place insights require a confirmed category tag.")
+
+
+def _is_category_place(tag: dict) -> bool:
+    ident = str(tag.get("id") or "")
+    kind = str(tag.get("type") or "")
+    return ident.startswith("urn:tag:category:place:") or kind == "urn:tag:category:place"
+
+
 def _is_usable_tag(tag: dict) -> bool:
     ident = str(tag.get("id") or "")
     if not ident.startswith("urn:tag:"):
@@ -474,7 +549,7 @@ def _best_tag(groups: list[tuple[str, list[dict]]]) -> Optional[dict]:
         words = _distinctive_words(phrase)
         for tag in tags:
             ident = str(tag.get("id") or "")
-            if not ident or not _is_usable_tag(tag):
+            if not ident or not _is_usable_tag(tag) or not _is_category_place(tag):
                 continue
             name = f"{tag.get('name', '')} {ident}".lower()
             score = sum(1 for word in words if word in name)
@@ -583,21 +658,16 @@ def _place(item: dict) -> dict:
     }
 
 
-def _taste_section(signals: list[dict]) -> ReportSection:
-    if not signals:
-        return ReportSection(
-            heading="Taste signals",
-            body=(
-                "Qloo returned no place affinities for this idea and location. "
-                "Treat the rest of the brief as based on your answers."
-            ),
-        )
-    lines = []
-    for signal in signals[:8]:
-        bits = [signal["name"]]
-        if signal.get("tags"):
-            bits.append(", ".join(signal["tags"][:4]))
-        if signal.get("detail"):
-            bits.append(signal["detail"])
-        lines.append(" — ".join(bits))
-    return ReportSection(heading="Taste signals", body="\n".join(lines))
+def _plain_places(signals: list[dict]) -> str:
+    sentences = []
+    for place in signals[:6]:
+        about = (place.get("detail") or "").strip()
+        if about:
+            sentences.append(f"{place['name']} is described as {about.rstrip('.')}.")
+        else:
+            sentences.append(f"{place['name']} showed up as a match.")
+    return (
+        "Qloo matched these places to the idea. "
+        + " ".join(sentences)
+        + " Treat them as aggregate taste matches, not proof of demand."
+    )

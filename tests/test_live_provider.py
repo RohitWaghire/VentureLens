@@ -26,9 +26,9 @@ def test_qloo_uses_a_place_tag_and_the_answered_location():
                         "tags": [
                             {"id": "urn:tag:genre:media:comedy", "name": "Comedy", "type": "urn:tag:genre:media"},
                             {
-                                "id": "urn:tag:genre:place:grocery_store",
+                                "id": "urn:tag:category:place:grocery_store",
                                 "name": "Grocery Store",
-                                "type": "urn:tag:genre:place",
+                                "type": "urn:tag:category:place",
                             },
                         ]
                     }
@@ -56,10 +56,10 @@ def test_qloo_uses_a_place_tag_and_the_answered_location():
     )
     insights = next(url for url in calls if "/v2/insights" in url)
     query = parse_qs(urlparse(insights).query)
-    assert query["filter.tags"] == ["urn:tag:genre:place:grocery_store"]
+    assert query["filter.tags"] == ["urn:tag:category:place:grocery_store"]
     assert "signal.interests.tags" not in query
     assert query["filter.location.query"] == ["New York"]
-    taste = next(section.body for section in report.sections if section.heading == "Taste signals")
+    taste = next(section.body for section in report.sections if section.heading == "What similar places suggest")
     assert "Corner Market" in taste
 
 
@@ -73,9 +73,9 @@ def test_gpt6_luna_brief_omits_temperature_and_keeps_qloo_places():
                 "results": {
                     "tags": [
                         {
-                            "id": "urn:tag:genre:place:grocery_store",
+                            "id": "urn:tag:category:place:grocery_store",
                             "name": "Grocery Store",
-                            "type": "urn:tag:genre:place",
+                            "type": "urn:tag:category:place",
                         }
                     ],
                     "entities": [
@@ -105,7 +105,7 @@ def test_gpt6_luna_brief_omits_temperature_and_keeps_qloo_places():
     assert captured["body"]["reasoning_effort"] == "none"
     assert "temperature" not in captured["body"]
     assert captured["auth"] == "Bearer llm-test"
-    assert any(section.heading == "Taste signals" and "Corner Market" in section.body for section in report.sections)
+    assert any(section.heading == "What similar places suggest" and "Corner Market" in section.body for section in report.sections)
     assert "aggregate Qloo" in report.caveat
 
 
@@ -123,8 +123,68 @@ def test_qloo_timeout_still_writes_the_brief():
         [],
     )
     assert report.title
-    taste = next(section.body for section in report.sections if section.heading == "Taste signals")
+    taste = next(section.body for section in report.sections if section.heading == "What similar places suggest")
     assert "no place affinities" in taste
+
+
+def test_model_rewrites_qloo_places_without_raw_tags():
+    settings = _settings()
+
+    def fetch(method, url, headers, body, timeout):
+        if method == "GET":
+            return 200, json.dumps(
+                {
+                    "results": {
+                        "tags": [
+                            {
+                                "id": "urn:tag:category:place:grocery_store",
+                                "name": "Grocery Store",
+                                "type": "urn:tag:category:place",
+                            }
+                        ],
+                        "entities": [
+                            {
+                                "name": "Food Bazaar",
+                                "entity_id": "place-1",
+                                "tags": [{"name": "Metal cans"}, {"name": "Impulse visit"}],
+                                "properties": {"short_description": "Neighborhood supermarket."},
+                            }
+                        ],
+                    }
+                }
+            ).encode()
+        user = json.loads(body)["messages"][-1]["content"]
+        if '"places"' in user:
+            return 200, json.dumps(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "body": (
+                                            "Food Bazaar is a neighborhood supermarket. "
+                                            "Qloo is pointing at grocery stores like this, not a demand forecast."
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    ]
+                }
+            ).encode()
+        return _brief()
+
+    report = LiveProvider(settings, fetch).write_report(
+        BusinessProfile(idea="grocery shop", region="New York"),
+        "I want to start a grocery shop in New York.",
+        [],
+    )
+    section = next(item for item in report.sections if item.heading == "What similar places suggest")
+    assert "Food Bazaar" in section.body
+    assert "neighborhood supermarket" in section.body
+    assert "Metal cans" not in section.body
+    assert "Impulse visit" not in section.body
 
 
 def test_uncertain_tag_does_not_call_insights():
@@ -151,11 +211,11 @@ def test_uncertain_tag_does_not_call_insights():
         [GrillTurn(question_id="focus", question="Where will you open?", answer="Brooklyn")],
     )
     assert not any("/v2/insights" in url for url in calls)
-    taste = next(section.body for section in report.sections if section.heading == "Taste signals")
+    taste = next(section.body for section in report.sections if section.heading == "What similar places suggest")
     assert "no place affinities" in taste
 
 
-def test_cuisine_tag_without_the_word_place_is_a_valid_signal():
+def test_genre_tag_is_not_a_place_category_filter():
     settings = _settings()
     calls = []
 
@@ -172,7 +232,12 @@ def test_cuisine_tag_without_the_word_place_is_a_valid_signal():
                                 "id": "urn:tag:genre:restaurant:Italian",
                                 "name": "Italian",
                                 "type": "urn:tag:genre:restaurant",
-                            }
+                            },
+                            {
+                                "id": "urn:tag:category:place:restaurant",
+                                "name": "Restaurant",
+                                "type": "urn:tag:category:place",
+                            },
                         ]
                     }
                 }
@@ -186,7 +251,28 @@ def test_cuisine_tag_without_the_word_place_is_a_valid_signal():
     )
     insights = next(url for url in calls if "/v2/insights" in url)
     query = parse_qs(urlparse(insights).query)
-    assert query["filter.tags"] == ["urn:tag:genre:restaurant:Italian"]
+    assert query["filter.tags"] == ["urn:tag:category:place:restaurant"]
+    assert "signal.interests.tags" not in query
+
+
+def test_interest_signal_request_is_rejected():
+    from app.providers.base import ProviderError
+
+    settings = _settings()
+    provider = LiveProvider(settings, lambda *args, **kwargs: (200, b"{}"))
+    for params in (
+        {
+            "filter.type": "urn:entity:place",
+            "signal.interests.tags": "urn:tag:category:place:grocery_store",
+            "filter.location.query": "New York",
+        },
+        {"filter.type": "urn:entity:place", "filter.location.query": "New York"},
+    ):
+        try:
+            provider._qloo_get("/v2/insights", params)
+        except ProviderError:
+            continue
+        raise AssertionError(params)
 
 
 def test_cafe_tag_matches_a_coffee_shop():

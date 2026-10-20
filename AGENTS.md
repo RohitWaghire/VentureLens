@@ -53,3 +53,9 @@ Use these terms consistently.
 3. Charge research in the provider seam and respect configured timeouts.
 4. Before enabling livable: review/document what the provider receives
    (retention, training, terms) and add a user disclosure.
+
+## Rules
+
+| Rule | Enforced by |
+| --- | --- |
+| Place insights ask for places of a confirmed category. The tag id starts with `urn:tag:category:place:` and is sent as `filter.tags`. An interest signal (`signal.interests.*`) is a different question and is rejected. A location with no category tag is not an insights call. | `place_insights_params` and `LiveProvider._qloo_get` in `app/providers/live.py`. `tests/test_live_provider.py` (`test_interest_signal_request_is_rejected`, `test_genre_tag_is_not_a_place_category_filter`). |
