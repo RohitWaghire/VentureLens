@@ -7,6 +7,10 @@ __pycache__/
 # Secrets & local env
 .env
 *.env
+!.env.example
+
+# Devpost Learn — personal learning context stays out of commits by default
+/devpost/learner-profile.md
 
 # Test artifacts
 .pytest_cache/

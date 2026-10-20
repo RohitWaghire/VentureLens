@@ -27,4 +27,4 @@ testpaths = ["tests"]
 addopts = "-q"
 
 [tool.setuptools.package-data]
-"app" = ["templates/*.html", "static/*.css", "static/*.js"]
+"app" = ["templates/*.html", "static/*.css"]

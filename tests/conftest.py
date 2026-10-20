@@ -21,7 +21,7 @@ def make_settings(**overrides) -> Settings:
         "rate_limit_per_ip": 100_000,
         "session_query_budget": 100,
         "global_query_budget": 100_000,
-        "debug": True,
+        "provider": "demo",
     }
     defaults.update(overrides)
     for key, value in defaults.items():

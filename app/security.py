@@ -45,10 +45,6 @@ def origin_allowed(request: Request, allowed_origins: List[str]) -> bool:
     return origin in allowed_origins
 
 
-def origin_from_settings(request, settings) -> bool:
-    return origin_allowed(request, settings.allowed_origins)
-
-
 class RateLimiter:
     """Fixed-window per-IP rate limiting."""
 
@@ -69,10 +65,6 @@ class RateLimiter:
             window.append(now)
             self._hits[key] = window
             return True
-
-    def reset(self) -> None:
-        with self._lock:
-            self._hits.clear()
 
 
 class QueryBudget:
@@ -103,13 +95,6 @@ class QueryBudget:
         session.bump_queries(count)
         return True
 
-    def session_remaining(self, session: Session) -> int:
-        return max(0, self.per_session - session.query_count)
-
-    def global_used(self) -> int:
-        with self._lock:
-            return self._global_used
-
 
 def csrf_token(secret: str, session: Session) -> str:
     msg = f"csrf:{session.id}:{session.csrf_salt}".encode()
@@ -119,17 +104,3 @@ def csrf_token(secret: str, session: Session) -> str:
 def verify_csrf(secret: str, session: Session, token: Optional[str]) -> bool:
     expected = csrf_token(secret, session)
     return hmac.compare_digest(expected, token or "")
-
-
-def require_csrf_or_origin(
-    request: Request,
-    settings,
-    session: Session,
-    form_token: Optional[str] = None,
-) -> bool:
-    """State-changing requests must pass origin or CSRF-token validation."""
-    if origin_from_settings(request, settings):
-        return True
-    if form_token:
-        return verify_csrf(settings.secret_key, session, form_token)
-    return False

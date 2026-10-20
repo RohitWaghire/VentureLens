@@ -19,13 +19,21 @@ from fastapi.templating import Jinja2Templates
 
 from app import markdown
 from app.config import Settings, get_settings
-from app.model import BusinessProfile, GrillTurn
+from app.planning import BUDGET, QUESTION, REPORT, UNAVAILABLE, Planner
 from app.providers import get_provider
-from app.providers.base import Provider
 from app.security import RateLimiter, QueryBudget, client_ip, csrf_token, verify_csrf, origin_allowed
-from app.sessions import Session, SessionStore
+from app.sessions import SessionStore
 
 _TEMPLATE_DIR = "app/templates"
+
+
+def _disclosure(provider_name: str) -> str:
+    if provider_name == "demo":
+        return "Preview mode uses illustrative demo data, not live research."
+    return (
+        "Live mode sends your idea, place, and answers to Qloo and to the configured model. "
+        "VentureLens keeps them only for this session."
+    )
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -33,7 +41,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     store = SessionStore(settings.session_max_age_seconds)
     limiter = RateLimiter(settings.rate_limit_per_ip, settings.rate_limit_window_seconds)
     budget = QueryBudget(settings.session_query_budget, settings.global_query_budget)
-    provider: Provider = get_provider()
+    provider = get_provider(settings)
+    planner = Planner(provider, budget)
     templates = Jinja2Templates(directory=_TEMPLATE_DIR)
 
     app = FastAPI(title=settings.app_name)
@@ -78,33 +87,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "tagline": settings.tagline,
             "csrf": csrf_token(settings.secret_key, session) if session else "",
             "demo_mode": getattr(provider, "name", "demo") == "demo",
+            "disclosure": _disclosure(getattr(provider, "name", "demo")),
         }
         base.update(extra)
         return base
 
-    def charge(session, count: int = 1) -> bool:
-        return budget.register_spend(session, count)
-
     def valid_form_token(session, token: str) -> bool:
         return bool(session and verify_csrf(settings.secret_key, session, token))
 
-    def ensure_report(session) -> bool:
-        """Build and cache the report once; False when the budget is exhausted."""
-        if session.report is not None:
-            return True
-        if not charge(session, 1):
-            return False
-        session.report = provider.write_report(
-            session.profile or BusinessProfile(),
-            session.transcript,
-        )
-        return True
-
-    def current_question(session):
-        profile = session.profile or BusinessProfile()
-        if session.transcript:
-            return provider.next_question(profile, session.transcript)
-        return provider.first_question(profile, session.opening)
+    def redirect_for(kind: str):
+        if kind == BUDGET:
+            return RedirectResponse("/error?reason=budget", status_code=303)
+        if kind == UNAVAILABLE:
+            return RedirectResponse("/error?reason=provider", status_code=303)
+        if kind == QUESTION:
+            return RedirectResponse("/grill", status_code=303)
+        return RedirectResponse("/report", status_code=303)
 
     # --- entry ---------------------------------------------------------------
     @app.get("/", response_class=HTMLResponse)
@@ -130,14 +128,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return PlainTextResponse("Invalid session token. Refresh and try again.", status_code=403)
         if not prompt:
             return RedirectResponse("/?error=Please describe your business idea to begin.", status_code=303)
-        if not charge(session, 1):
-            return RedirectResponse("/error?reason=budget", status_code=303)
-        # Reset this session in place so its rate/budget accounting stays attached.
-        session.opening = prompt
-        session.profile = provider.extract_opening(prompt)
-        session.transcript = []
-        session.report = None
-        return RedirectResponse("/grill", status_code=303)
+        return redirect_for(planner.start(session, prompt))
 
     # --- grilling ------------------------------------------------------------
     @app.get("/grill", response_class=HTMLResponse)
@@ -147,11 +138,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return RedirectResponse("/", status_code=303)
         if session.report is not None:
             return RedirectResponse("/report", status_code=303)
-        question = current_question(session)
+        question = planner.current_question(session)
         if question is None:
-            if not ensure_report(session):
-                return RedirectResponse("/error?reason=budget", status_code=303)
-            return RedirectResponse("/report", status_code=303)
+            return redirect_for(planner.ensure_report(session))
         return templates.TemplateResponse(
             request,
             "grill.html",
@@ -160,7 +149,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 session,
                 question=question,
                 transcript=session.transcript,
-                profile=session.profile or BusinessProfile(),
+                profile=session.profile,
             ),
         )
 
@@ -180,13 +169,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not valid_form_token(session, csrf):
             return PlainTextResponse("Invalid session token. Refresh and try again.", status_code=403)
         answer = (answer or "").strip() or (freetext or "").strip()
-        if finish != "1" and answer:
-            session.transcript.append(GrillTurn(question_id=qid, question=qtext, answer=answer))
-        if finish == "1" or not answer or current_question(session) is None:
-            if not ensure_report(session):
-                return RedirectResponse("/error?reason=budget", status_code=303)
-            return RedirectResponse("/report", status_code=303)
-        return RedirectResponse("/grill", status_code=303)
+        return redirect_for(planner.answer(session, answer, finish == "1"))
 
     # --- report --------------------------------------------------------------
     @app.get("/report", response_class=HTMLResponse)
@@ -197,8 +180,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if session.report is None:
             if not session.profile and not session.transcript:
                 return RedirectResponse("/", status_code=303)
-            if not ensure_report(session):
-                return RedirectResponse("/error?reason=budget", status_code=303)
+            kind = planner.ensure_report(session)
+            if kind != REPORT:
+                return redirect_for(kind)
         return templates.TemplateResponse(
             request,
             "report.html",
@@ -206,7 +190,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 request,
                 session,
                 report=session.report,
-                profile=session.profile or BusinessProfile(),
+                profile=session.profile,
                 transcript=session.transcript,
             ),
         )
@@ -253,6 +237,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session = session_only(request)
         message = {
             "budget": "This session has used its research allowance. Start a new session to continue.",
+            "provider": "The taste service or the model did not return a brief. Check the live provider settings and try again.",
         }.get(request.query_params.get("reason", "unknown"), "Something went wrong. Please try starting over.")
         return templates.TemplateResponse(request, "error.html", ctx(request, session, message=message))
 

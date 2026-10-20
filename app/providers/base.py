@@ -1,58 +1,45 @@
-"""Provider adapter interface and notes on how real services plug in.
+"""Provider interface.
 
-The app depends on the ``Provider`` interface only. The demo provider is the
-default (deterministic, credential-free, fully testable).
+Callers learn three methods. ``extract_opening`` and ``question`` are shared:
+every adapter asks the same next question. ``write_report`` is the seam where
+the demo brief and the live Qloo-plus-model brief differ.
 
-Mapping to the requested pipeline:
-- ``first_question`` / ``next_question`` emulate the "grilling" skill: they
-  dynamically produce a question and shortlisted answer options derived from
-  the user's prompt and prior answers. A real deployment implements this as an
-  LLM call that respects the provider seam and session/global budgets.
-- ``write_report`` emulates the model step that consumes the collected answers
-  and returns a report. The user's reference calls this "Qloo LLM"; in practice
-  Qloo is a taste/data API and the reasoning model is the configured LLM, so a
-  real adapter composes both. The demo provider stands in until credentials are
-  wired through ``VL_PROVIDER``.
+A live call raises ``ProviderError`` with a message that is safe to show.
+The message never includes credentials or response bodies.
 """
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List
 
 from app.model import BusinessProfile, GrillQuestion, GrillTurn, Report
+from app.providers import grilling
+
+
+class ProviderError(Exception):
+    """The live provider could not finish a report. Safe to show to the user."""
 
 
 class Provider:
     name: str = "base"
 
     def extract_opening(self, text: str) -> BusinessProfile:
-        """Best-effort parse of the opening prompt into a profile."""
-        raise NotImplementedError
+        """Parse idea, budget, and region from the opening prompt."""
+        return grilling.extract_opening(text)
 
-    def first_question(
-        self,
-        profile: BusinessProfile,
-        opening: str,
-    ) -> GrillQuestion:
-        """Return the first grilling question for this prompt."""
-        raise NotImplementedError
-
-    def next_question(
+    def question(
         self,
         profile: BusinessProfile,
         transcript: List[GrillTurn],
-    ) -> Optional[GrillQuestion]:
-        """Return the next grilling question, or None when grilling is done.
-
-        Each returned question may depend on the opening prompt and prior
-        answers, mirroring the grilling skill's dynamic questioning.
-        """
-        raise NotImplementedError
+    ) -> GrillQuestion | None:
+        """Return the next grilling question, or None when grilling is done."""
+        return grilling.next_question(profile, transcript)
 
     def write_report(
         self,
         profile: BusinessProfile,
+        opening: str,
         transcript: List[GrillTurn],
     ) -> Report:
-        """Consume the collected answers and return the report."""
+        """Write the brief from the opening prompt and the collected answers."""
         raise NotImplementedError

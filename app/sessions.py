@@ -74,17 +74,3 @@ class SessionStore:
             return
         with self._lock:
             self._sessions.pop(session_id, None)
-
-    def purge_expired(self) -> int:
-        """Remove all expired sessions; returns how many were removed."""
-        removed = 0
-        with self._lock:
-            expired = [sid for sid, s in self._sessions.items() if s.expired]
-            for sid in expired:
-                del self._sessions[sid]
-                removed += 1
-        return removed
-
-    def size(self) -> int:
-        with self._lock:
-            return len(self._sessions)

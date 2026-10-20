@@ -22,10 +22,6 @@ class BusinessProfile(BaseModel):
     budget: str = ""
     region: str = ""
 
-    @property
-    def has_idea(self) -> bool:
-        return bool(self.idea.strip())
-
 
 class GrillOption(BaseModel):
     """A suggested answer shown as a selectable chip."""
@@ -41,7 +37,6 @@ class GrillQuestion(BaseModel):
     text: str
     options: List[GrillOption] = Field(default_factory=list)
     free_text_hint: str = ""
-    allow_free_text: bool = True
 
 
 class GrillTurn(BaseModel):

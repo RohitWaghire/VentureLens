@@ -18,7 +18,6 @@ class Settings:
         self.tagline = os.getenv("VL_TAGLINE", "A clearer view of where to grow.")
         # Dev-only default; always set a real VL_SECRET_KEY before public deployment.
         self.secret_key = os.getenv("VL_SECRET_KEY", "dev-secret-change-me")
-        self.debug = os.getenv("VL_DEBUG", "0") == "1"
 
         # Session lifecycle.
         self.session_max_age_seconds = int(os.getenv("VL_SESSION_MAX_AGE_SECONDS", "3600"))
@@ -32,7 +31,6 @@ class Settings:
         self.rate_limit_window_seconds = int(os.getenv("VL_RATE_LIMIT_WINDOW_SECONDS", "60"))
         self.session_query_budget = int(os.getenv("VL_SESSION_QUERY_BUDGET", "30"))
         self.global_query_budget = int(os.getenv("VL_GLOBAL_QUERY_BUDGET", "200000"))
-        self.request_max_bytes = int(os.getenv("VL_REQUEST_MAX_BYTES", str(1024 * 1024)))
         self.trusted_proxies = [
             p.strip() for p in os.getenv("VL_TRUSTED_PROXIES", "").split(",") if p.strip()
         ]
@@ -46,7 +44,6 @@ class Settings:
         ]
 
         # Provider timeouts (bounded costs and latency).
-        self.search_timeout_seconds = float(os.getenv("VL_SEARCH_TIMEOUT_SECONDS", "20"))
         self.qloo_timeout_seconds = float(os.getenv("VL_QLOO_TIMEOUT_SECONDS", "20"))
         self.llm_timeout_seconds = float(os.getenv("VL_LLM_TIMEOUT_SECONDS", "60"))
 
@@ -58,14 +55,10 @@ class Settings:
         self.llm_api_key = os.getenv("VL_LLM_API_KEY", "")
         self.llm_provider = os.getenv("VL_LLM_PROVIDER", "")
         self.llm_model = os.getenv("VL_LLM_MODEL", "")
-        self.search_api_key = os.getenv("VL_SEARCH_API_KEY", "")
-        self.search_provider = os.getenv("VL_SEARCH_PROVIDER", "")
+        self.llm_base_url = os.getenv("VL_LLM_BASE_URL", "")
         self.qloo_api_key = os.getenv("VL_QLOO_API_KEY", "")
-        self.qloo_base_url = os.getenv("VL_QLOO_BASE_URL", "https://api.qloo.com")
-
-    @property
-    def cookie_secure_active(self) -> bool:
-        return self.cookie_secure
+        # Hackathon keys only authenticate against this host.
+        self.qloo_base_url = os.getenv("VL_QLOO_BASE_URL", "https://hackathon.api.qloo.com")
 
 
 @lru_cache(maxsize=1)

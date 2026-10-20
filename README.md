@@ -62,7 +62,7 @@ commit a real secret. Key knobs:
 | `VL_TRUSTED_PROXIES` | Proxy allowlist whose `X-Forwarded-For` is trusted. |
 | `VL_ALLOWED_ORIGINS` | Origin allowlist for state-changing requests. |
 | `VL_COOKIE_SECURE` | Enable when serving over HTTPS. |
-| `VL_LLM_*`, `VL_SEARCH_*`, `VL_QLOO_*` | Optional real-provider credentials. |
+| `VL_LLM_*`, `VL_QLOO_*` | Live provider only. Ignored while `VL_PROVIDER=demo`. |
 
 ## Architecture
 
