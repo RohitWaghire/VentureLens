@@ -250,12 +250,6 @@ def frontier(profile: BusinessProfile, transcript: List[GrillTurn]) -> List[Gril
     return ready
 
 
-def next_question(profile: BusinessProfile, transcript: List[GrillTurn]) -> Optional[GrillQuestion]:
-    """Return the first frontier question, or None when the tree is settled."""
-    ready = frontier(profile, transcript)
-    return ready[0] if ready else None
-
-
 def answers_report(profile: BusinessProfile, transcript: List[GrillTurn]) -> Report:
     """A brief built only from the collected answers."""
     idea = profile.idea or "your business"

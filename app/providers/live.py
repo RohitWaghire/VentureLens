@@ -1,8 +1,8 @@
 """Live report writer: Qloo taste signals, then a model brief.
 
-Grilling stays on the shared question pool. ``write_report`` sends the idea
-and place to Qloo, then sends those signals plus the answers to an
-OpenAI-compatible chat model. VentureLens does not store either response.
+``write_report`` sends the idea and place to Qloo, then sends those signals
+plus the answers to an OpenAI-compatible chat model. VentureLens does not
+store either response.
 
 The HTTP transport is injected so tests can exercise this adapter with no network.
 """
@@ -110,7 +110,7 @@ class LiveProvider(Provider):
     def _taste(self, profile: BusinessProfile, transcript: List[GrillTurn], opening: str = "") -> list[dict]:
         if not self.settings.qloo_api_key:
             raise ProviderError("Set VL_QLOO_API_KEY before using the live provider.")
-        phrases = _search_phrases(profile, transcript, opening)
+        phrases = _search_phrases(profile, opening)
         location = _location(profile, transcript, opening)
         self._qloo_down = False
         idea_words = _distinctive_words(f"{profile.idea} {opening}")
@@ -439,11 +439,7 @@ def _chat_payload(model: str, messages: list) -> dict:
     return payload
 
 
-def _search_phrases(
-    profile: BusinessProfile,
-    transcript: List[GrillTurn],
-    opening: str = "",
-) -> list[str]:
+def _search_phrases(profile: BusinessProfile, opening: str = "") -> list[str]:
     """The idea's own words, longest first. No fixed list of business types."""
     idea = (profile.idea or opening or "").strip()
     return _content_words(idea)[:2] or ["local business"]

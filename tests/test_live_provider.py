@@ -192,17 +192,14 @@ def test_search_phrases_come_from_the_idea_itself():
 
     chocolate = _search_phrases(
         BusinessProfile(idea="boxed chocolate shop"),
-        [],
         "I want a boxed chocolate shop in New Hampshire",
     )
     yoga = _search_phrases(
         BusinessProfile(idea="yoga studio"),
-        [],
         "I want to open a yoga studio in Austin",
     )
     books = _search_phrases(
         BusinessProfile(idea="used bookstore"),
-        [],
         "I want a used bookstore in Portland",
     )
     assert chocolate[0] == "chocolate"

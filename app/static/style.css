@@ -222,8 +222,6 @@ html { scrollbar-color: rgba(14, 19, 17, 0.35) transparent; }
   font-weight: 500;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
 }
-.reply-composer .keyboard-hint { color: rgba(0, 0, 0, 0.62); }
-.composer-hint > span { margin-right: 4px; }
 .send-button {
   display: inline-flex;
   align-items: center;
@@ -245,7 +243,6 @@ html { scrollbar-color: rgba(14, 19, 17, 0.35) transparent; }
 .send-button:focus-visible { outline: 2px solid #fff; outline-offset: 3px; box-shadow: 0 0 0 5px #0e1311; }
 .send-button:hover { color: #fff; background: #1c1c1c; }
 .send-button:disabled { cursor: not-allowed; opacity: 0.48; }
-.send-arrow { font-size: 16px; line-height: 1; }
 
 .prompt-examples {
   display: flex;
@@ -381,7 +378,7 @@ html { scrollbar-color: rgba(14, 19, 17, 0.35) transparent; }
 }
 .glass-composer:empty { height: 18px; padding: 0; }
 .inline-form { display: inline-flex; margin: 0; }
-.back-link, .text-link, .skip-button {
+.back-link, .text-link {
   min-height: auto;
   padding: 4px 0;
   border: 0;
@@ -392,7 +389,7 @@ html { scrollbar-color: rgba(14, 19, 17, 0.35) transparent; }
   cursor: pointer;
   text-decoration: none;
 }
-.back-link:hover, .text-link:hover, .skip-button:hover { color: #000; }
+.back-link:hover, .text-link:hover { color: #000; }
 .interview-shell .back-link,
 .interview-shell .session-label { color: #111; }
 .interview-shell .back-link:hover { color: #000; }
