@@ -124,7 +124,7 @@ def test_qloo_timeout_still_writes_the_brief():
     )
     assert report.title
     taste = next(section.body for section in report.sections if section.heading == "What similar places suggest")
-    assert "no place affinities" in taste
+    assert "could not be reached" in taste
 
 
 def test_model_rewrites_qloo_places_without_raw_tags():
@@ -702,8 +702,8 @@ def test_questions_change_with_the_business_idea():
         ).encode()
 
     provider = LiveProvider(settings, fetch)
-    yoga = provider.frontier(BusinessProfile(idea="yoga studio"), [])
-    grocery = provider.frontier(BusinessProfile(idea="grocery shop"), [])
+    yoga = provider.frontier(BusinessProfile(idea="yoga studio", region="Austin"), [])
+    grocery = provider.frontier(BusinessProfile(idea="grocery shop", region="New York City"), [])
     assert "classes" in yoga[0].text
     assert "shelves" in grocery[0].text
     assert yoga[0].text != grocery[0].text

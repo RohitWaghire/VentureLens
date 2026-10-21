@@ -56,6 +56,84 @@ def _model_questions(text: str, options: list[str]) -> tuple[int, bytes]:
     return 200, json.dumps(payload).encode()
 
 
+def test_a_missing_city_is_asked_before_the_model():
+    calls = []
+
+    def fetch(method, url, headers, body, timeout):
+        calls.append(url)
+        return _model_questions("What should the shop sell?", ["Produce", "Pantry goods", "Both"])
+
+    questions = LiveProvider(_settings(), fetch).frontier(
+        BusinessProfile(idea="dropshipping store"),
+        [],
+    )
+    assert questions[0].text == "Which U.S. city should this be in?"
+    assert calls == []
+
+
+def test_a_city_answer_is_sent_to_qloo():
+    from app.providers.live import _location
+
+    place = _location(
+        BusinessProfile(idea="dropshipping store"),
+        [
+            GrillTurn(
+                question_id="place",
+                question="Which U.S. city should this be in?",
+                answer="Austin",
+            )
+        ],
+    )
+    assert place == "Austin"
+
+
+def test_without_a_city_the_brief_says_qloo_was_not_asked():
+    calls = []
+
+    def fetch(method, url, headers, body, timeout):
+        calls.append(url)
+        if method == "GET":
+            return 200, b'{"results":{"entities":[]}}'
+        return 200, json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "title": "Brief",
+                                    "summary": "A dropshipping brief.",
+                                    "sections": [{"heading": "Next", "body": "Pick a city."}],
+                                }
+                            )
+                        }
+                    }
+                ]
+            }
+        ).encode()
+
+    report = LiveProvider(_settings(), fetch).write_report(
+        BusinessProfile(idea="dropshipping store"),
+        "I want to start a dropshipping store.",
+        [GrillTurn(question_id="focus", question="What will you sell?", answer="Home goods")],
+    )
+    section = next(item for item in report.sections if item.heading == "What similar places suggest")
+    assert "no place affinities" not in section.body
+    assert "city" in section.body.lower()
+    assert not any("/v2/insights" in url for url in calls)
+
+
+def test_a_category_answer_is_searched_with_the_idea():
+    from app.providers.live import _search_phrases
+
+    phrases = _search_phrases(
+        BusinessProfile(idea="dropshipping store"),
+        "",
+        [GrillTurn(question_id="focus", question="What will you sell?", answer="Home goods")],
+    )
+    assert "goods" in phrases
+
+
 def test_a_grocery_shop_and_a_yoga_studio_are_not_asked_the_same_question():
     def fetch(method, url, headers, body, timeout):
         user = json.loads(body)["messages"][1]["content"]

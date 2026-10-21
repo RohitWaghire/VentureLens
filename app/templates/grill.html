@@ -84,10 +84,24 @@
           function refresh() {
             if (button) button.disabled = !answered();
           }
+          question.addEventListener('pointerdown', function (event) {
+            var chip = event.target.closest('.option-chip');
+            if (!chip) return;
+            var input = chip.querySelector('input');
+            if (input) input.checked = true;
+            refresh();
+          });
           question.addEventListener('input', refresh);
           question.addEventListener('change', refresh);
           form.addEventListener('submit', function (event) {
-            if (!answered()) event.preventDefault();
+            if (!answered()) {
+              event.preventDefault();
+              return;
+            }
+            if (!button) return;
+            button.disabled = true;
+            var label = button.querySelector('span');
+            if (label) label.textContent = 'Continuing…';
           });
           refresh();
         })();

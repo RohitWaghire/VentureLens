@@ -46,7 +46,7 @@ class Planner:
         return ready[0] if ready else None
 
     def record(self, session: Session, answers: dict[str, str]) -> str:
-        """Store this round's answers. Unanswered frontier questions stay open."""
+        """Store the answer and return. The next question is chosen on the following page."""
         by_id = {question.id: question for question in self.frontier(session)}
         for question_id, text in answers.items():
             text = (text or "").strip()
@@ -56,9 +56,7 @@ class Planner:
             session.transcript.append(
                 GrillTurn(question_id=question.id, question=question.text, answer=text)
             )
-        if self.frontier(session):
-            return QUESTION
-        return CONFIRM
+        return QUESTION
 
     def confirm(self, session: Session) -> str:
         """Write the brief only after the tree is settled."""

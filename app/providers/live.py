@@ -80,6 +80,8 @@ class LiveProvider(Provider):
         cached = self._frontier_cache.get(key)
         if cached is not None:
             return cached
+        if not _location(profile, transcript) and not _answered_place(transcript):
+            return [_city_question()]
         if len(transcript) >= 8:
             questions: List[GrillQuestion] = []
         else:
@@ -114,23 +116,37 @@ class LiveProvider(Provider):
     def _taste(self, profile: BusinessProfile, transcript: List[GrillTurn], opening: str = "") -> list[dict]:
         if not self.settings.qloo_api_key:
             raise ProviderError("Set VL_QLOO_API_KEY before using the live provider.")
-        phrases = _search_phrases(profile, opening)
+        phrases = _search_phrases(profile, opening, transcript)
         location = _location(profile, transcript, opening)
+        self._place_gap = ""
+        if not location:
+            self._place_gap = "no-city"
+            return []
         self._qloo_down = False
-        idea_words = _distinctive_words(f"{profile.idea} {opening}")
+        idea_words = _distinctive_words(
+            " ".join([profile.idea or "", opening or ""] + [turn.answer for turn in transcript])
+        )
         tags = _ranked_tags(
             [(phrase, self._tags_for(phrase)) for phrase in phrases],
             idea_words,
         )
-        if not tags or self._qloo_down:
+        if self._qloo_down:
+            self._place_gap = "down"
+            return []
+        if not tags:
+            self._place_gap = "no-tags"
             return []
         # A named city stays on the request. An empty city is not a reason to
         # search the world; the only wider call is the same state, and only
         # places near that city are kept.
         for tag in tags[:2]:
             places = self._local_places(tag["id"], location)
-            if places or self._qloo_down:
+            if self._qloo_down:
+                self._place_gap = "down"
+                return []
+            if places:
                 return places
+        self._place_gap = "no-places"
         return []
 
     def _insights(self, tag_id: str, location: str) -> tuple[int, object]:
@@ -169,6 +185,7 @@ class LiveProvider(Provider):
         )
         _raise_for_qloo_status(status)
         if status != 200:
+            log.warning("qloo tag lookup returned %s", status)
             return []
         return _tags(payload)
 
@@ -209,6 +226,7 @@ class LiveProvider(Provider):
                         "Do not repeat a topic already answered. Do not ask a question whose answer "
                         "depends on something still open. Options are 3 to 5 short choices. "
                         "recommendation is one of those options. "
+                        "If region is empty, ask which U.S. city they want before any other question. "
                         "If nothing material is left to decide, return {\"questions\": []}."
                     ),
                 },
@@ -262,13 +280,7 @@ class LiveProvider(Provider):
         """Ask the model to turn raw Qloo places into a short founder note."""
         heading = "What similar places suggest"
         if not signals:
-            return ReportSection(
-                heading=heading,
-                body=(
-                    "Qloo returned no place affinities for this idea and location. "
-                    "Treat the rest of the brief as based on your answers."
-                ),
-            )
+            return ReportSection(heading=heading, body=_missing_places(getattr(self, "_place_gap", "")))
         parsed = self._chat(
             [
                 {
@@ -447,10 +459,22 @@ def _chat_payload(model: str, messages: list) -> dict:
     return payload
 
 
-def _search_phrases(profile: BusinessProfile, opening: str = "") -> list[str]:
-    """The idea's own words, longest first. No fixed list of business types."""
+def _search_phrases(
+    profile: BusinessProfile,
+    opening: str = "",
+    transcript: Optional[List[GrillTurn]] = None,
+) -> list[str]:
+    """The idea's own words, longest first, then words from the answers."""
     idea = (profile.idea or opening or "").strip()
-    return _content_words(idea)[:2] or ["local business"]
+    words = _content_words(idea)
+    seen = set(words)
+    for turn in transcript or []:
+        for word in _content_words(turn.answer):
+            if word in seen:
+                continue
+            seen.add(word)
+            words.append(word)
+    return words[:4] or ["local business"]
 
 
 def _content_words(phrase: str) -> list[str]:
@@ -470,10 +494,41 @@ def _location(profile: BusinessProfile, transcript: List[GrillTurn], opening: st
         answer = (turn.answer or "").strip()
         if not answer or answer.lower() in _GENERIC_ANSWERS:
             continue
-        if any(word in question for word in ("where", "city", "neighborhood", "location", "area")):
+        if _is_place_turn(turn):
             parsed = extract_opening(f"shop in {answer}").region
             return _qloo_location(parsed or answer)
     return ""
+
+
+def _is_place_turn(turn: GrillTurn) -> bool:
+    question = f"{turn.question_id} {turn.question}".lower()
+    return any(word in question for word in ("where", "city", "neighborhood", "location", "area", "place"))
+
+
+def _answered_place(transcript: List[GrillTurn]) -> bool:
+    return any(_is_place_turn(turn) and (turn.answer or "").strip() for turn in transcript)
+
+
+def _city_question() -> GrillQuestion:
+    return GrillQuestion(
+        id="place",
+        text="Which U.S. city should this be in?",
+        free_text_hint="Name a city.",
+    )
+
+
+def _missing_places(reason: str) -> str:
+    if reason == "no-city":
+        return (
+            "Qloo was not asked for places because this session has no U.S. city. "
+            "Name a city to get a place list."
+        )
+    if reason == "down":
+        return "Qloo could not be reached, so this brief has no place list."
+    return (
+        "Qloo returned no place affinities for this idea and location. "
+        "Treat the rest of the brief as based on your answers."
+    )
 
 
 def _qloo_location(value: str) -> str:

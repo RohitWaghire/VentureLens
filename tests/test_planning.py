@@ -39,6 +39,32 @@ def _session() -> Session:
     return Session("session", 3600)
 
 
+def test_saving_an_answer_does_not_wait_for_the_next_question():
+    class Once(Provider):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def frontier(self, profile, transcript):
+            self.calls += 1
+            if self.calls > 1:
+                raise AssertionError("the next question was requested while saving the answer")
+            return [
+                GrillQuestion(
+                    id="q1",
+                    text="First?",
+                    options=[GrillOption(label="Yes", value="Yes")],
+                )
+            ]
+
+        def write_report(self, profile, opening, transcript):
+            return answers_report(profile, transcript)
+
+    planner = Planner(Once(), QueryBudget(10, 10))
+    session = _session()
+    planner.start(session, "I want to open a coffee shop in Austin.")
+    assert planner.record(session, {"q1": "Yes"}) == QUESTION
+
+
 def test_starting_stores_the_city_and_does_not_write_the_brief():
     planner = _planner()
     session = _session()

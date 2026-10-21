@@ -50,7 +50,7 @@ class TestGrilling:
 
     def test_answers_advance_without_replaying_history(self, client):
         token = csrf_for(client)
-        client.post("/start", data={"prompt": "coffee shop", "csrf": token})
+        client.post("/start", data={"prompt": "coffee shop in Austin", "csrf": token})
         token = csrf_for(client)
         from tests.helpers import answer_current
 
@@ -64,7 +64,7 @@ class TestGrilling:
 
     def test_grill_offer_options_come_from_the_question(self, client):
         token = csrf_for(client)
-        client.post("/start", data={"prompt": "coffee shop", "csrf": token})
+        client.post("/start", data={"prompt": "coffee shop in Austin", "csrf": token})
         r = client.get("/grill")
         assert 'type="radio" name="a_launch"' in r.text
         assert "Within 6 months" in r.text
@@ -73,7 +73,7 @@ class TestGrilling:
         from tests.helpers import walk_to_confirm
 
         token = csrf_for(client)
-        client.post("/start", data={"prompt": "coffee shop", "csrf": token})
+        client.post("/start", data={"prompt": "coffee shop in Austin", "csrf": token})
         page = walk_to_confirm(client)
         assert "Does this match what you mean?" in page.text
         token = csrf_for(client, "/grill")
