@@ -58,7 +58,7 @@ def test_qloo_uses_a_place_tag_and_the_answered_location():
     query = parse_qs(urlparse(insights).query)
     assert query["filter.tags"] == ["urn:tag:category:place:grocery_store"]
     assert "signal.interests.tags" not in query
-    assert query["filter.location.query"] == ["New York"]
+    assert query["filter.location.query"] == ["New York City"]
     taste = next(section.body for section in report.sections if section.heading == "What similar places suggest")
     assert "Corner Market" in taste
 
@@ -202,9 +202,16 @@ def test_search_phrases_come_from_the_idea_itself():
         BusinessProfile(idea="used bookstore"),
         "I want a used bookstore in Portland",
     )
+    tea = _search_phrases(BusinessProfile(idea="tea shop"), "I want a tea shop")
+    gym = _search_phrases(BusinessProfile(idea="gym"), "I want to open a gym")
+    bar = _search_phrases(BusinessProfile(idea="bar"), "I want to open a bar")
     assert chocolate[0] == "chocolate"
     assert "yoga" in yoga
     assert books[0] == "bookstore"
+    assert tea == ["tea"]
+    assert gym == ["gym"]
+    assert bar == ["bar"]
+    assert "local business" not in tea + gym + bar
     canned = {"coffee shop", "chocolate shop", "grocery store", "candy store"}
     assert canned.isdisjoint(yoga)
     assert canned.isdisjoint(books)
@@ -315,6 +322,136 @@ def test_far_places_are_left_out_of_a_city_brief():
     assert "Home Depot" not in taste
     assert "Montreal" not in taste
     assert "is described as" not in taste
+
+
+def test_new_york_city_keeps_nearby_places_and_drops_far_ones():
+    from app.providers.live import _miles
+
+    settings = _settings()
+    calls = []
+    city = (40.7128, -74.0060)
+    eataly = (40.7420, -73.9890)
+    albany = (42.6526, -73.7562)
+    assert _miles(*city, *eataly) < 40
+    assert _miles(*city, *albany) > 40
+
+    def fetch(method, url, headers, body, timeout):
+        if method != "GET":
+            return _brief()
+        calls.append((url, timeout))
+        if "/v2/tags" in url:
+            return 200, _grocery_tags()
+        return 200, json.dumps(
+            {
+                "query": {
+                    "localities": {
+                        "filter": [
+                            {
+                                "name": "New York City",
+                                "disambiguation": "New York City, New York County, New York, United States",
+                                "location": {"lat": city[0], "lon": city[1]},
+                            }
+                        ]
+                    }
+                },
+                "results": {
+                    "entities": [
+                        _place("Eataly", "near", eataly, "Italian market in New York City."),
+                        _place("Albany Market", "far", albany, "Grocery in Albany."),
+                    ]
+                },
+            }
+        ).encode()
+
+    report = LiveProvider(settings, fetch).write_report(
+        BusinessProfile(idea="grocery shop", region=""),
+        "I want to start a grocery shop in NYC.",
+        [],
+    )
+    insights = [url for url, _timeout in calls if "/v2/insights" in url]
+    assert [parse_qs(urlparse(url).query)["filter.location.query"][0] for url in insights] == [
+        "New York City"
+    ]
+    qloo_timeouts = {timeout for url, timeout in calls if "/v2/" in url}
+    assert qloo_timeouts == {settings.qloo_timeout_seconds}
+    taste = next(section.body for section in report.sections if section.heading == "What similar places suggest")
+    assert "Eataly" in taste
+    assert "Albany Market" not in taste
+
+
+def test_state_resolution_keeps_places_far_from_the_centroid():
+    from app.providers.live import _is_city, _miles, _resolved_locality
+
+    settings = _settings()
+    settings.qloo_timeout_seconds = 17
+    center = (42.9538, -75.5268)
+    eataly = (40.7420, -73.9890)
+    assert _miles(*center, *eataly) > 40
+    payload = {
+        "query": {
+            "localities": {
+                "filter": [
+                    {
+                        "name": "New York",
+                        "disambiguation": "New York, United States",
+                        "location": {"lat": center[0], "lon": center[1]},
+                    }
+                ]
+            }
+        },
+        "results": {
+            "entities": [
+                _place("Eataly", "nyc", eataly, "Italian market in New York City."),
+            ]
+        },
+    }
+    resolved = _resolved_locality(payload)
+    assert resolved["state"] == ""
+    assert _is_city(resolved) is False
+
+    def fetch(method, url, headers, body, timeout):
+        if method != "GET":
+            return _brief()
+        assert timeout == 17
+        if "/v2/tags" in url:
+            return 200, _grocery_tags()
+        return 200, json.dumps(payload).encode()
+
+    report = LiveProvider(settings, fetch).write_report(
+        BusinessProfile(idea="grocery shop", region="New York"),
+        "I want to start a grocery shop in New York.",
+        [],
+    )
+    taste = next(section.body for section in report.sections if section.heading == "What similar places suggest")
+    assert "Eataly" in taste
+
+
+def test_tag_lookup_errors_are_not_empty_place_lists():
+    settings = _settings()
+
+    def fetch_status(status):
+        def fetch(method, url, headers, body, timeout):
+            if "/v2/tags" in url:
+                return status, b"{}"
+            return _brief()
+
+        return fetch
+
+    for status in (401, 429):
+        try:
+            LiveProvider(settings, fetch_status(status)).write_report(
+                BusinessProfile(idea="grocery shop", region="New York"),
+                "I want to start a grocery shop in New York.",
+                [],
+            )
+        except ProviderError as exc:
+            text = str(exc).lower()
+            if status == 401:
+                assert "refused" in text
+            else:
+                assert "rate limit" in text
+            continue
+        raise AssertionError(status)
 
 
 def test_chocolate_shop_prefers_the_shop_category():
@@ -582,6 +719,31 @@ def _settings() -> Settings:
     settings.llm_model = "gpt-6-luna"
     settings.llm_base_url = ""
     return settings
+
+
+def _grocery_tags() -> bytes:
+    return json.dumps(
+        {
+            "results": {
+                "tags": [
+                    {
+                        "id": "urn:tag:category:place:grocery_store",
+                        "name": "Grocery Store",
+                        "type": "urn:tag:category:place",
+                    }
+                ]
+            }
+        }
+    ).encode()
+
+
+def _place(name: str, entity_id: str, point: tuple[float, float], detail: str) -> dict:
+    return {
+        "name": name,
+        "entity_id": entity_id,
+        "location": {"lat": point[0], "lon": point[1]},
+        "properties": {"short_description": detail},
+    }
 
 
 def _brief():

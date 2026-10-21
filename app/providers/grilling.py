@@ -162,16 +162,13 @@ def extract_opening(text: str) -> BusinessProfile:
     if budget:
         profile.budget = budget.group(0)
     low = text.lower()
-    state = ""
-    for _abbr, name in data.US_STATES.items():
-        if name.lower() in low:
-            state = name
-            break
-    if not state and (re.search(r"\bnyc\b", low) or "new york city" in low):
-        state = "New York"
     place = _place_after_in(text)
     if place.lower() in {"nyc", "new york city"}:
-        place = "New York"
+        place = "New York City"
+    elif not place and (re.search(r"\bnyc\b", low) or "new york city" in low):
+        place = "New York City"
+    # "New York" is inside "New York City". Qloo reads the shorter name as the state.
+    state = "" if place.lower() == "new york city" else _named_state(low)
     if not state and not place:
         for metro in data.KNOWN_METROS:
             if metro in low:
@@ -193,6 +190,16 @@ def extract_opening(text: str) -> BusinessProfile:
     idea_raw = re.split(r"\bin\s+[A-Za-z]", idea_raw, maxsplit=1)[0].strip(" .,;:")
     profile.idea = idea_raw
     return profile
+
+
+def _named_state(low: str) -> str:
+    """A state named in the prompt. New York City is not that state."""
+    scrubbed = re.sub(r"\bnyc\b", " ", low)
+    scrubbed = scrubbed.replace("new york city", " ")
+    for _abbr, name in data.US_STATES.items():
+        if name.lower() in scrubbed:
+            return name
+    return ""
 
 
 _NOT_A_PLACE = {

@@ -133,15 +133,8 @@ class LiveProvider(Provider):
         status, payload = self._qloo_get(
             "/v2/insights",
             place_insights_params(tag_id, location),
-            timeout=60,
         )
-        if status in (401, 403):
-            raise ProviderError(
-                "Qloo refused the request. Use a hackathon key with "
-                "https://hackathon.api.qloo.com."
-            )
-        if status == 429:
-            raise ProviderError("Qloo rate limit reached. Try again shortly.")
+        _raise_for_qloo_status(status)
         return status, payload
 
     def _local_places(self, tag_id: str, location: str) -> list[dict]:
@@ -170,6 +163,7 @@ class LiveProvider(Provider):
             "/v2/tags",
             {"filter.query": phrase[:80], "take": "8"},
         )
+        _raise_for_qloo_status(status)
         if status != 200:
             return []
         return _tags(payload)
@@ -423,6 +417,16 @@ class LiveProvider(Provider):
         )
 
 
+def _raise_for_qloo_status(status: int) -> None:
+    if status in (401, 403):
+        raise ProviderError(
+            "Qloo refused the request. Use a hackathon key with "
+            "https://hackathon.api.qloo.com."
+        )
+    if status == 429:
+        raise ProviderError("Qloo rate limit reached. Try again shortly.")
+
+
 def _chat_payload(model: str, messages: list) -> dict:
     """Build a chat-completions body the named model will accept.
 
@@ -446,22 +450,17 @@ def _search_phrases(profile: BusinessProfile, opening: str = "") -> list[str]:
 
 
 def _content_words(phrase: str) -> list[str]:
-    words = {
-        word
-        for word in re.findall(r"[a-z]+", phrase.lower())
-        if len(word) > 3 and word not in _GENERIC_QUERY_WORDS
-    }
-    return sorted(words, key=lambda word: (-len(word), word))
+    return sorted(_query_words(phrase), key=lambda word: (-len(word), word))
 
 
 def _location(profile: BusinessProfile, transcript: List[GrillTurn], opening: str = "") -> str:
     if (profile.region or "").strip():
-        return profile.region.strip()
+        return _qloo_location(profile.region)
     from app.providers.grilling import extract_opening
 
     stated = extract_opening(opening).region
     if stated:
-        return stated
+        return _qloo_location(stated)
     for turn in transcript:
         question = turn.question.lower()
         answer = (turn.answer or "").strip()
@@ -469,8 +468,16 @@ def _location(profile: BusinessProfile, transcript: List[GrillTurn], opening: st
             continue
         if any(word in question for word in ("where", "city", "neighborhood", "location", "area")):
             parsed = extract_opening(f"shop in {answer}").region
-            return parsed or answer
+            return _qloo_location(parsed or answer)
     return ""
+
+
+def _qloo_location(value: str) -> str:
+    """Send the city Qloo can resolve. Bare 'New York' is the state."""
+    text = (value or "").strip()
+    if text.casefold() in {"nyc", "new york city"}:
+        return "New York City"
+    return text
 
 
 _GENERIC_ANSWERS = {
@@ -548,6 +555,14 @@ _GENERIC_QUERY_WORDS = {
     "custom", "residential", "commercial", "small", "family", "used",
 }
 
+# Length alone is not enough: "tea", "gym", and "bar" are real categories.
+_SHORT_FUNCTION_WORDS = {
+    "the", "and", "for", "but", "not", "you", "our", "its", "are", "was",
+    "can", "has", "had", "her", "his", "who", "how", "why", "any", "all",
+    "out", "off", "too", "via", "per", "let", "she", "him", "own", "may",
+    "did", "get", "got", "use", "new", "old", "one", "two",
+}
+
 
 _ALIASES = {
     "coffee": ["cafe", "café", "espresso", "coffeehouse"],
@@ -559,12 +574,18 @@ _ALIASES = {
 }
 
 
-def _distinctive_words(phrase: str) -> set[str]:
-    words = {
+def _query_words(phrase: str) -> set[str]:
+    return {
         word
         for word in re.findall(r"[a-z]+", phrase.lower())
-        if len(word) > 3 and word not in _GENERIC_QUERY_WORDS
+        if len(word) >= 3
+        and word not in _GENERIC_QUERY_WORDS
+        and word not in _SHORT_FUNCTION_WORDS
     }
+
+
+def _distinctive_words(phrase: str) -> set[str]:
+    words = _query_words(phrase)
     extra = set()
     for word in words:
         extra.update(_ALIASES.get(word, []))
@@ -795,11 +816,17 @@ def _resolved_locality(payload: object) -> Optional[dict]:
 
 
 def _is_city(center: Optional[dict]) -> bool:
+    """True only when Qloo resolved a city, not the state that shares its name.
+
+    A state comes back as "New York, United States". That has no separate state
+    field. Calling it a city measures distance from the state centroid and drops
+    places that were valid for the state.
+    """
     if not center or center.get("lat") is None or center.get("lon") is None:
         return False
     name = str(center.get("name") or "").strip().lower()
     state = str(center.get("state") or "").strip().lower()
-    return bool(name) and name != state
+    return bool(name) and bool(state) and name != state
 
 
 def _miles(lat1: float, lon1: float, lat2: object, lon2: object) -> Optional[float]:

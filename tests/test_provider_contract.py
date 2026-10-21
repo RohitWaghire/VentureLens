@@ -22,6 +22,15 @@ class TestOpening:
         assert profile.region == "Albany"
         assert profile.idea.strip() == "roofing repair business"
 
+    def test_new_york_city_is_not_reduced_to_the_state(self):
+        city = P.extract_opening("I want to start a grocery shop in New York City.")
+        nyc = P.extract_opening("I want to start a grocery shop in NYC.")
+        state = P.extract_opening("I want to start a grocery shop in New York.")
+        assert city.region == "New York City"
+        assert nyc.region == "New York City"
+        assert state.region == "New York"
+        assert city.idea.strip() == "grocery shop"
+
     def test_empty_prompt_is_safe(self):
         assert P.extract_opening("").idea == ""
 
