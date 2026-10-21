@@ -68,7 +68,9 @@ class LiveProvider(Provider):
         self._frontier_cache: dict = {}
 
     def frontier(self, profile: BusinessProfile, transcript: List[GrillTurn]) -> List[GrillQuestion]:
-        """Questions that are specific to this idea, not a shared checklist."""
+        """The next question for this idea. A model failure is not a shared checklist."""
+        if not self.settings.llm_api_key or not self.settings.llm_model:
+            raise ProviderError("Set VL_LLM_API_KEY and VL_LLM_MODEL before grilling.")
         key = (
             profile.idea,
             profile.region,
@@ -83,9 +85,11 @@ class LiveProvider(Provider):
         else:
             generated = self._questions_for_idea(profile, transcript)
             if generated is None or (not generated and not transcript):
-                questions = super().frontier(profile, transcript)
-            else:
-                questions = generated
+                raise ProviderError(
+                    "The planning guide could not form the next question. "
+                    "Check the live provider settings and try again."
+                )
+            questions = generated[:1]
         self._frontier_cache[key] = questions
         return questions
 
@@ -199,8 +203,8 @@ class LiveProvider(Provider):
                     "content": (
                         "You are grilling a founder about one specific business. "
                         "Return JSON {\"questions\": [{\"id\", \"text\", \"options\", \"recommendation\"}]}. "
-                        "Ask 3 questions that can be decided from what is already known. "
-                        "Each question must be specific to this business. A grocery shop, a yoga studio, "
+                        "Ask exactly one question that can be decided from what is already known. "
+                        "The question must be specific to this business. A grocery shop, a yoga studio, "
                         "and a coffee shop must not receive the same questions. "
                         "Do not repeat a topic already answered. Do not ask a question whose answer "
                         "depends on something still open. Options are 3 to 5 short choices. "
@@ -229,7 +233,7 @@ class LiveProvider(Provider):
         asked = {turn.question.strip().lower() for turn in transcript}
         asked_ids = {turn.question_id for turn in transcript}
         questions = []
-        for item in parsed["questions"][:4]:
+        for item in parsed["questions"][:1]:
             if not isinstance(item, dict):
                 continue
             text = str(item.get("text") or "").strip()

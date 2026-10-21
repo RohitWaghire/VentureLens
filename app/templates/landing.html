@@ -12,7 +12,7 @@
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <label for="opening-prompt" class="sr-only">Describe your business idea and U.S. region</label>
       <textarea id="opening-prompt" name="prompt" rows="3" maxlength="2000" required
-        placeholder="I have $250k and want to open a specialty coffee shop in Illinois."></textarea>
+        placeholder="Describe the business and where you want to open it."></textarea>
       <div class="composer-footer">
         <span class="composer-hint"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7v7h10M13 10l4 4-4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Include a U.S. state or region to begin</span>
         <button class="send-button" type="submit" aria-label="Start planning session">
@@ -28,11 +28,6 @@
     </div>
 
     <div class="trust-note"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 13.4 8l4.8 1.4L13.4 10.8 12 15.6 10.6 10.8 5.8 9.4 10.6 8z" fill="currentColor"/></svg> Your answers stay in this session. Optional details can be skipped.</div>
-    <div class="prompt-sample">
-      <span class="prompt-sample-label">A PROMPT LOOKS LIKE</span>
-      <p>I have $250k and want to open a specialty coffee shop in Illinois.</p>
-    </div>
-    {% if demo_mode %}<p class="demo-note">Preview mode: recommendations use illustrative demo data, not live research.</p>{% endif %}
   </section>
   <script>
     (function () {

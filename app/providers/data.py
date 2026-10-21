@@ -1,7 +1,7 @@
-"""Place names the demo provider can recognize in an opening prompt.
+"""Place names the opening prompt can recognize.
 
-These lists let the grilling flow skip a location question when the prompt
-already names a U.S. state or a known metro. They are not market research.
+These lists notice a U.S. state or a known metro already written in the prompt.
+They are not market research and they are not a question list.
 """
 
 from __future__ import annotations

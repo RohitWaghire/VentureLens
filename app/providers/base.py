@@ -1,8 +1,8 @@
 """Provider interface.
 
-Callers learn three methods. ``extract_opening`` and ``question`` are shared:
-every adapter asks the same next question. ``write_report`` is the seam where
-the demo brief and the live Qloo-plus-model brief differ.
+Callers learn three methods. ``extract_opening`` reads the opening prompt.
+``question`` is the next grilling question. ``write_report`` asks Qloo for
+places and the model for the brief.
 
 A live call raises ``ProviderError`` with a message that is safe to show.
 The message never includes credentials or response bodies.
@@ -41,8 +41,8 @@ class Provider:
         profile: BusinessProfile,
         transcript: List[GrillTurn],
     ) -> List[GrillQuestion]:
-        """Every question that can be asked now, given the answers so far."""
-        return grilling.frontier(profile, transcript)
+        """The next question, chosen by the live provider from this idea."""
+        return []
 
     def write_report(
         self,

@@ -47,11 +47,10 @@ class Settings:
         self.qloo_timeout_seconds = float(os.getenv("VL_QLOO_TIMEOUT_SECONDS", "20"))
         self.llm_timeout_seconds = float(os.getenv("VL_LLM_TIMEOUT_SECONDS", "60"))
 
-        # Provider selection. "demo" is a deterministic, credential-free provider so the
-        # app runs and is fully testable before real credentials are configured.
-        self.provider = os.getenv("VL_PROVIDER", "demo")
+        # The app always uses the live provider. VL_PROVIDER is ignored.
+        self.provider = "live"
 
-        # Optional credentials for real providers (adapter seams only; demo ignores them).
+        # Credentials for Qloo and the model. Missing keys are a visible error.
         self.llm_api_key = os.getenv("VL_LLM_API_KEY", "")
         self.llm_provider = os.getenv("VL_LLM_PROVIDER", "")
         self.llm_model = os.getenv("VL_LLM_MODEL", "")

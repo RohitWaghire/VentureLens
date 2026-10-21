@@ -1,15 +1,15 @@
 """VentureLens FastAPI application.
 
-Pipeline: user prompt -> dynamic grilling (options shortlisted per prompt) ->
-collected answers -> the model writes a report -> presented to the user.
+Pipeline: user prompt -> one grilling question at a time -> collected answers
+-> Qloo places and the model write a report -> presented to the user.
 
 Server-rendered, with an in-memory session store, per-IP rate limiting,
-per-session/global research budgets, cookie/CSRF protections, and a
-deterministic demo provider behind a replaceable seam.
+per-session/global research budgets, and cookie/CSRF protections.
 """
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Optional
 
@@ -22,20 +22,18 @@ from app import markdown
 from app.config import Settings, get_settings
 from app.planning import BUDGET, CONFIRM, QUESTION, REPORT, UNAVAILABLE, Planner
 from app.providers import get_provider
+from app.providers.base import ProviderError
 from app.security import RateLimiter, QueryBudget, client_ip, csrf_token, verify_csrf, origin_allowed
 from app.sessions import SessionStore
 
 _TEMPLATE_DIR = "app/templates"
 _STYLE_PATH = Path(__file__).resolve().parent / "static" / "style.css"
+log = logging.getLogger(__name__)
 
-
-def _disclosure(provider_name: str) -> str:
-    if provider_name == "demo":
-        return "Preview mode uses illustrative demo data, not live research."
-    return (
-        "Live mode sends your idea, place, and answers to Qloo and to the configured model. "
-        "VentureLens keeps them only for this session."
-    )
+_DISCLOSURE = (
+    "Live mode sends your idea, place, and answers to Qloo and to the configured model. "
+    "VentureLens keeps them only for this session."
+)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -88,8 +86,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "app_name": settings.app_name,
             "tagline": settings.tagline,
             "csrf": csrf_token(settings.secret_key, session) if session else "",
-            "demo_mode": getattr(provider, "name", "demo") == "demo",
-            "disclosure": _disclosure(getattr(provider, "name", "demo")),
+            "disclosure": _DISCLOSURE,
             "css_version": str(int(_STYLE_PATH.stat().st_mtime)) if _STYLE_PATH.exists() else "1",
         }
         base.update(extra)
@@ -97,6 +94,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def valid_form_token(session, token: str) -> bool:
         return bool(session and verify_csrf(settings.secret_key, session, token))
+
+    def guarded(action):
+        try:
+            return redirect_for(action())
+        except ProviderError as exc:
+            log.warning("live provider failed: %s", exc)
+            return redirect_for(UNAVAILABLE)
 
     def redirect_for(kind: str):
         if kind == BUDGET:
@@ -141,7 +145,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return RedirectResponse("/", status_code=303)
         if session.report is not None:
             return RedirectResponse("/report", status_code=303)
-        questions = planner.frontier(session)
+        try:
+            questions = planner.frontier(session)
+        except ProviderError as exc:
+            log.warning("live provider failed: %s", exc)
+            return redirect_for(UNAVAILABLE)
         if not questions:
             return templates.TemplateResponse(
                 request,
@@ -168,14 +176,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not valid_form_token(session, csrf):
             return PlainTextResponse("Invalid session token. Refresh and try again.", status_code=403)
         if confirm == "1":
-            return redirect_for(planner.confirm(session))
+            return guarded(lambda: planner.confirm(session))
         form = await request.form()
-        answers = {}
-        for question in planner.frontier(session):
-            typed = str(form.get(f"t_{question.id}") or "").strip()
-            picked = str(form.get(f"a_{question.id}") or "").strip()
-            answers[question.id] = typed or picked
-        return redirect_for(planner.record(session, answers))
+
+        def save_answers():
+            answers = {}
+            for question in planner.frontier(session):
+                typed = str(form.get(f"t_{question.id}") or "").strip()
+                picked = str(form.get(f"a_{question.id}") or "").strip()
+                answers[question.id] = typed or picked
+            return planner.record(session, answers)
+
+        return guarded(save_answers)
 
     # --- report --------------------------------------------------------------
     @app.get("/report", response_class=HTMLResponse)

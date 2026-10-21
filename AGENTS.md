@@ -5,9 +5,10 @@ Guidance for AI coding agents working in this repository.
 ## Project
 
 VentureLens is a server-rendered FastAPI app for evidence-backed small-business
-planning (MVP per `PROJECT_PLAN.md`). The default `demo` provider is
-deterministic and credential-free so the app and tests run with no external
-services.
+planning (MVP per `PROJECT_PLAN.md`). The app always uses the live provider:
+the model asks the next grilling question, and Qloo supplies places for the
+brief. There is no demo checklist. Tests inject a fake transport and must not
+call live APIs or use credentials.
 
 ## Domain vocabulary
 
@@ -35,9 +36,9 @@ Use these terms consistently.
   the browser or commit them.
 - No user accounts or persistent history. In-memory sessions expire server
   side; expired sessions are rejected on every read/write.
-- Test externally observable behavior at the FastAPI boundary with the demo
-  provider; avoid coupling tests to internal functions. Tests must require no
-  live APIs or credentials.
+- Test externally observable behavior at the FastAPI boundary with the live
+  provider and an injected transport. Do not add a demo provider or a shared
+  question checklist. Tests must require no live APIs or credentials.
 
 ## Commands
 
@@ -49,7 +50,7 @@ Use these terms consistently.
 ## Adding a real provider
 
 1. Implement `app.providers.base.Provider`.
-2. Register it in `app/providers/__init__.py` by `VL_PROVIDER` name.
+2. Register it in `app/providers/__init__.py`. Do not add a demo provider or a shared question checklist.
 3. Charge research in the provider seam and respect configured timeouts.
 4. Before enabling livable: review/document what the provider receives
    (retention, training, terms) and add a user disclosure.

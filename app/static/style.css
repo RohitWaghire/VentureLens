@@ -310,33 +310,6 @@ html { scrollbar-color: rgba(14, 19, 17, 0.35) transparent; }
   font-weight: 500;
   text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
 }
-.prompt-sample {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: min(100%, 680px);
-  margin: 16px auto 0;
-  padding: 8px 14px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 16px 40px -24px rgba(0, 0, 0, 0.35);
-  text-align: left;
-}
-.prompt-sample-label {
-  flex: none;
-  color: #505050;
-  font-family: "Schibsted Grotesk", sans-serif;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-}
-.prompt-sample p {
-  margin: 0;
-  color: #111;
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 1.35;
-}
 .demo-note {
   width: fit-content;
   max-width: min(542px, 100%);
@@ -750,7 +723,6 @@ button.ghost:hover { background: #f8f8f8; }
   .example-chip { min-height: 44px; }
   .examples-label { width: 100%; }
   .prompt-examples { justify-content: flex-start; }
-  .prompt-sample { flex-wrap: wrap; gap: 6px 12px; }
   .interview-shell { width: 100%; padding: 0; }
   .interview-demo-note { margin-left: 0; }
   .grill-dock { width: 100%; }
@@ -789,9 +761,7 @@ button.ghost:hover { background: #f8f8f8; }
 .page-frame:has(.landing-shell) .landing-intro,
 .page-frame:has(.landing-shell) .prompt-composer,
 .page-frame:has(.landing-shell) .prompt-examples,
-.page-frame:has(.landing-shell) .trust-note,
-.page-frame:has(.landing-shell) .prompt-sample,
-.page-frame:has(.landing-shell) .demo-note {
+.page-frame:has(.landing-shell) .trust-note {
   margin-top: 0;
 }
 .page-frame:has(.landing-shell) .landing-shell h1 {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app.providers.base import ProviderError
 from tests.helpers import csrf_for, make_settings
 from app.main import create_app
 
@@ -15,7 +16,9 @@ class TestEntry:
         assert "vl_session" in r.headers.get("set-cookie", "")
         assert 'id="opening-prompt"' in r.text
         assert "Start exploring" in r.text
-        assert "illustrative demo data" in r.text.lower()
+        assert "illustrative demo data" not in r.text.lower()
+        assert "demo flow" not in r.text.lower()
+        assert "sends your idea" in r.text.lower()
 
     def test_blank_prompt_returns_error(self, client):
         token = csrf_for(client)
@@ -30,72 +33,84 @@ class TestEntry:
 
 
 class TestGrilling:
-    def test_start_opens_first_dynamic_question(self, client):
+    def test_start_opens_only_the_current_question(self, client):
         token = csrf_for(client)
         client.post(
             "/start",
             data={"prompt": "I have $250k and want to open a specialty coffee shop in Illinois.", "csrf": token},
         )
         r = client.get("/grill")
-        assert "When would you hope to launch?" in r.text
-        assert "Who is your primary customer" in r.text
+        assert 'class="question-title">When would you hope to launch?</h1>' in r.text
+        assert r.text.count('class="round-question"') == 1
+        assert "Who is your primary customer" not in r.text
         assert "What's your approximate start-up budget?" not in r.text
+        assert "Do you have a location" not in r.text
+        assert "Decisions we can settle now" not in r.text
         assert "(Recommended)" in r.text
-        assert "PLANNING GUIDE" in r.text
 
     def test_answers_advance_without_replaying_history(self, client):
         token = csrf_for(client)
         client.post("/start", data={"prompt": "coffee shop", "csrf": token})
         token = csrf_for(client)
-        client.post(
-            "/grill",
-            data={"csrf": token, "a_budget": "Under $150k"},
-        )
+        from tests.helpers import answer_current
+
+        answer_current(client)
         r = client.get("/grill")
-        assert "Under $150k" not in r.text
+        assert "Within 6 months" not in r.text
         assert "What's your approximate start-up budget?" not in r.text
-        assert "When would you hope to launch?" in r.text
+        assert 'class="question-title">Who is your primary customer?</h1>' in r.text
+        assert "When would you hope to launch?" not in r.text
+        assert r.text.count('class="round-question"') == 1
 
-    def test_grill_offer_options_derived_from_prompt(self, client):
+    def test_grill_offer_options_come_from_the_question(self, client):
         token = csrf_for(client)
         client.post("/start", data={"prompt": "coffee shop", "csrf": token})
         r = client.get("/grill")
-        assert 'type="radio" name="a_budget"' in r.text
-        assert "Under $50k" in r.text
+        assert 'type="radio" name="a_launch"' in r.text
+        assert "Within 6 months" in r.text
 
-    def test_confirm_after_the_tree_produces_report(self, client):
+    def test_confirm_after_the_questions_produces_report(self, client):
+        from tests.helpers import walk_to_confirm
+
         token = csrf_for(client)
         client.post("/start", data={"prompt": "coffee shop", "csrf": token})
-        token = csrf_for(client, "/grill")
-        client.post(
-            "/grill",
-            data={
-                "csrf": token,
-                "a_budget": "Under $150k",
-                "a_timeline": "Within 6 months",
-                "a_audience": "Local regulars",
-                "a_concept": "Lean and focused",
-                "a_location": "One city / metro",
-                "a_team": "Just me",
-            },
-        )
-        token = csrf_for(client, "/grill")
-        client.post(
-            "/grill",
-            data={
-                "csrf": token,
-                "a_coffee_position": "Espresso bar",
-                "a_open_questions": "Nothing else",
-            },
-        )
-        token = csrf_for(client, "/grill")
-        page = client.get("/grill")
+        page = walk_to_confirm(client)
         assert "Does this match what you mean?" in page.text
+        token = csrf_for(client, "/grill")
         client.post("/grill", data={"csrf": token, "confirm": "1"})
         r = client.get("/report")
         assert "Business brief" in r.text
-        assert "Under $150k" in r.text
-        assert "demo provider" in r.text.lower()
+        assert "Within 6 months" in r.text
+        assert "demo provider" not in r.text.lower()
+        assert "aggregate qloo" in r.text.lower()
+
+
+class TestLiveGrillingPage:
+    def test_a_failed_model_does_not_show_the_shared_checklist(self):
+        app = create_app(
+            make_settings(
+                provider="live",
+                qloo_api_key="qloo-test",
+                llm_api_key="llm-test",
+                llm_model="gpt-6-luna",
+            )
+        )
+
+        def fetch(method, url, headers, body, timeout):
+            raise ProviderError("The taste service or the model could not be reached.")
+
+        app.state.provider.fetch = fetch
+        with TestClient(app, raise_server_exceptions=False) as client:
+            token = csrf_for(client)
+            client.post(
+                "/start",
+                data={"prompt": "I want to start a grocery shop in NYC.", "csrf": token},
+            )
+            page = client.get("/grill")
+        assert page.status_code != 500
+        assert "start-up budget" not in page.text.lower()
+        assert "when would you hope to launch" not in page.text.lower()
+        assert "did not return" in page.text.lower() or "could not" in page.text.lower()
 
 
 class TestReport:

@@ -9,10 +9,6 @@
       </form>
     </div>
 
-    {% if demo_mode %}
-      <p class="demo-note interview-demo-note">Demo flow · questions are chosen from your idea. A live session still confirms them before the brief.</p>
-    {% endif %}
-
     {% if confirming %}
       <form class="reply-composer grill-dock" method="post" action="/grill">
         <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -39,52 +35,36 @@
       <form class="reply-composer grill-dock" method="post" action="/grill">
         <input type="hidden" name="csrf" value="{{ csrf }}">
         <div class="disclosure-card">
+          {% set question = questions[0] %}
           <div class="disclosure-trigger">
             <p class="message-byline">VENTURELENS <span>· PLANNING GUIDE</span></p>
-            <h1 id="grill-title" class="question-title">Decisions we can settle now</h1>
-            <p class="round-lead">Questions that depend on these wait for the next round.</p>
+            <h1 id="grill-title" class="question-title">{{ question.text }}</h1>
           </div>
           <div class="disclosure-body is-opening">
             <div class="disclosure-clip">
               <div class="disclosure-inner" aria-live="polite">
-                {% for question in questions %}
-                  <fieldset class="round-question"{% if not loop.first %} hidden{% endif %}>
-                    <legend class="round-legend">
-                      <span class="round-legend-row">
-                        <span class="question-chip">Q{{ loop.index }}</span>
-                        <span class="question-copy">{{ question.text }}</span>
-                      </span>
-                    </legend>
-                    {% if question.options %}
-                      <div class="option-set">
-                        {% for opt in question.options %}
-                          <label class="option-chip">
-                            <input type="radio" name="a_{{ question.id }}" value="{{ opt.value }}">
-                            <span>{{ opt.label }}{% if question.recommendation == opt.label %} (Recommended){% endif %}</span>
-                          </label>
-                        {% endfor %}
-                      </div>
-                    {% endif %}
-                    <label for="t-{{ question.id }}" class="sr-only">Your answer</label>
-                    <textarea id="t-{{ question.id }}" name="t_{{ question.id }}" rows="2"
-                      placeholder="{{ question.free_text_hint or 'Or type your own answer.' }}"></textarea>
-                    <div class="reply-footer">
-                      <button type="button" class="question-back" data-back aria-label="Previous question"{% if loop.first %} disabled{% endif %}>
-                        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                      </button>
-                      <span class="keyboard-hint"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 10 4 15l5 5M4 15h10a6 6 0 0 0 0-12h-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> <span>Continue when ready</span></span>
-                      {% if loop.last %}
-                        <button type="submit" class="send-button reply-send" data-default-submit aria-label="Continue interview" disabled>
-                          <span>Continue</span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                        </button>
-                      {% else %}
-                        <button type="button" class="send-button reply-send" data-advance disabled>
-                          <span>Continue</span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                        </button>
-                      {% endif %}
+                <fieldset class="round-question">
+                  <legend class="sr-only">{{ question.text }}</legend>
+                  {% if question.options %}
+                    <div class="option-set">
+                      {% for opt in question.options %}
+                        <label class="option-chip">
+                          <input type="radio" name="a_{{ question.id }}" value="{{ opt.value }}">
+                          <span>{{ opt.label }}{% if question.recommendation == opt.label %} (Recommended){% endif %}</span>
+                        </label>
+                      {% endfor %}
                     </div>
-                  </fieldset>
-                {% endfor %}
+                  {% endif %}
+                  <label for="t-{{ question.id }}" class="sr-only">Your answer</label>
+                  <textarea id="t-{{ question.id }}" name="t_{{ question.id }}" rows="2"
+                    placeholder="{{ question.free_text_hint or 'Or type your own answer.' }}"></textarea>
+                  <div class="reply-footer">
+                    <span class="keyboard-hint"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 10 4 15l5 5M4 15h10a6 6 0 0 0 0-12h-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> <span>Continue when ready</span></span>
+                    <button type="submit" class="send-button reply-send" data-default-submit aria-label="Continue interview" disabled>
+                      <span>Continue</span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                  </div>
+                </fieldset>
               </div>
             </div>
           </div>
@@ -92,79 +72,24 @@
       </form>
       <script>
         (function () {
-          var questions = Array.prototype.slice.call(document.querySelectorAll('.round-question'));
-          var body = document.querySelector('.disclosure-body');
+          var question = document.querySelector('.round-question');
           var form = document.querySelector('.grill-dock');
-          if (!questions.length) return;
-          var index = 0;
-          var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-          function answered(question) {
-            if (!question) return false;
+          if (!question || !form) return;
+          var button = question.querySelector('.reply-send');
+          function answered() {
             if (question.querySelector('input[type="radio"]:checked')) return true;
             var text = question.querySelector('textarea');
             return !!(text && text.value.trim());
           }
-          function refresh(question) {
-            var button = question.querySelector('.reply-send');
-            if (button) button.disabled = !answered(question);
+          function refresh() {
+            if (button) button.disabled = !answered();
           }
-          function openBody() {
-            if (reduce || !body) return;
-            body.classList.remove('is-opening');
-            body.classList.add('is-collapsed');
-            void body.offsetWidth;
-            body.classList.remove('is-collapsed');
-            body.classList.add('is-opening');
-          }
-          function show(next) {
-            index = next;
-            questions.forEach(function (question, i) {
-              question.hidden = i !== index;
-            });
-            var back = questions[index].querySelector('[data-back]');
-            if (back) back.disabled = index === 0;
-            openBody();
-          }
-          questions.forEach(function (question) {
-            refresh(question);
-            question.addEventListener('input', function () { refresh(question); });
-            question.addEventListener('change', function () { refresh(question); });
+          question.addEventListener('input', refresh);
+          question.addEventListener('change', refresh);
+          form.addEventListener('submit', function (event) {
+            if (!answered()) event.preventDefault();
           });
-          document.addEventListener('click', function (event) {
-            var back = event.target.closest('[data-back]');
-            if (back) {
-              if (back.disabled || index <= 0) return;
-              event.preventDefault();
-              show(index - 1);
-              return;
-            }
-            var button = event.target.closest('[data-advance]');
-            if (!button || button.disabled || index >= questions.length - 1) return;
-            event.preventDefault();
-            show(index + 1);
-          });
-          document.addEventListener('keydown', function (event) {
-            if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
-            if (!(event.target instanceof HTMLTextAreaElement)) return;
-            var question = event.target.closest('.round-question');
-            if (!question || question.hidden) return;
-            if (!answered(question) || index >= questions.length - 1) {
-              if (!answered(question)) {
-                event.preventDefault();
-                event.stopPropagation();
-              }
-              return;
-            }
-            event.preventDefault();
-            event.stopPropagation();
-            show(index + 1);
-          }, true);
-          if (form) {
-            form.addEventListener('submit', function (event) {
-              var current = questions[index];
-              if (current && !answered(current)) event.preventDefault();
-            });
-          }
+          refresh();
         })();
       </script>
     {% endif %}

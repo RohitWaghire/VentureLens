@@ -7,10 +7,9 @@ prompt, an adaptive grilling session asks a small number of questions with
 shortlisted answer options, and the model writes a report that is presented to
 the user (and can be downloaded as Markdown).
 
-> **Status:** Hackathon MVP. The grilling pipeline runs end-to-end now using a
-> deterministic, credential-free **demo provider**. A real LLM (and Qloo data)
-> is wired behind a replaceable seam but is not yet configured — see the
-> [Provider seam](#provider-seam).
+> **Status:** Hackathon MVP. Grilling questions come from the configured model,
+> one at a time. The brief uses those answers and Qloo places. Both keys are
+> required. There is no demo mode.
 
 ## Key behaviors
 
@@ -55,23 +54,21 @@ commit a real secret. Key knobs:
 | Variable | Purpose |
 | --- | --- |
 | `VL_SECRET_KEY` | Signs CSRF tokens. Set a strong random value before deploy. |
-| `VL_PROVIDER` | Adapter to use (`demo` is the default; no credentials). |
 | `VL_SESSION_MAX_AGE_SECONDS` | Server-side session lifetime fallback. |
 | `VL_RATE_LIMIT_PER_IP` | Per-IP requests per window. |
 | `VL_SESSION_QUERY_BUDGET` / `VL_GLOBAL_QUERY_BUDGET` | Research budget caps. |
 | `VL_TRUSTED_PROXIES` | Proxy allowlist whose `X-Forwarded-For` is trusted. |
 | `VL_ALLOWED_ORIGINS` | Origin allowlist for state-changing requests. |
 | `VL_COOKIE_SECURE` | Enable when serving over HTTPS. |
-| `VL_LLM_*`, `VL_QLOO_*` | Live provider only. Ignored while `VL_PROVIDER=demo`. |
+| `VL_LLM_*`, `VL_QLOO_*` | Model and Qloo credentials. Required. |
 
 ## Architecture
 
 - **`app/main.py`** — FastAPI app, server-rendered UI, and the grilling/report
   routes (`/`, `/start`, `/grill`, `/report`, `/report/download`, `/new`,
   `/close`).
-- **`app/providers/`** — the adapter seam (`base.Provider`) and the default
-  demo provider (`demo.DemoProvider`). `first_question`/`next_question` drive
-  dynamic grilling; `write_report` produces the brief.
+- **`app/providers/`** — the live provider. The model asks the next question.
+  `write_report` asks Qloo for places and the model for the brief.
 - **`app/sessions.py`** / **`app/security.py`** — session store, rate limiting,
   budgets, CSRF/origin and IP handling.
 - **`app/model.py`** — pydantic models for the profile, grilling questions,
@@ -81,19 +78,9 @@ commit a real secret. Key knobs:
 
 ### Provider seam
 
-The app depends on `app.providers.base.Provider` only. The `demo` provider is
-deterministic and credential-free so the app and tests run anywhere. A real
-adapter implements the same interface — dynamic grilling and report writing via
-an LLM, combined with Qloo data — and is registered in
-`app/providers/__init__.py` behind `VL_PROVIDER`. Before enabling live
-providers, review and disclose what each provider receives (retention,
-training, terms).
-
-## Demo note
-
-The demo provider generates questions and reports deterministically. It is a
-stand-in for a real LLM + Qloo integration, not real research or analysis. Do
-not present it as such in a public demo.
+The app depends on `app.providers.base.Provider`. `LiveProvider` is the only
+adapter. Tests replace its HTTP transport. Review and disclose what Qloo and
+the model receive (retention, training, terms) before a public demo.
 
 ## Testing
 
@@ -101,7 +88,7 @@ not present it as such in a public demo.
 
 - `tests/test_workflow.py` — end-to-end grilling pipeline through FastAPI
   (prompt → dynamic questions → report → download), CSRF, and budget caps.
-- `tests/test_provider_contract.py` — demo provider grilling + report behavior.
+- `tests/test_provider_contract.py` — opening-prompt parsing.
 - `tests/test_export.py` — Markdown report export.
 - `tests/test_security.py` — rate limit, budgets, CSRF, origin, IP.
 
