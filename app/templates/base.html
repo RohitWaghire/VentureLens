@@ -6,16 +6,17 @@
   <title>{% block title %}{{ app_name }} — {{ tagline }}{% endblock %}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fustat:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Fustat:wght@400;500;600;700&family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css?v={{ css_version }}">
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 </head>
 <body>
   <div class="page-bg" aria-hidden="true">
     <video class="page-video" src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260329_050842_be71947f-f16e-4a14-810c-06e83d23ddb5.mp4" autoplay muted playsinline preload="auto" tabindex="-1"></video>
-    <video class="page-video" src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260329_050842_be71947f-f16e-4a14-810c-06e83d23ddb5.mp4" muted playsinline preload="auto" tabindex="-1"></video>
+    <video class="page-video" data-src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260329_050842_be71947f-f16e-4a14-810c-06e83d23ddb5.mp4" muted playsinline preload="none" tabindex="-1"></video>
   </div>
   <div class="page-frame">
+    <a class="skip-link" href="#main-content">Skip to content</a>
     <header class="site-header">
       <a class="brand" href="/" aria-label="{{ app_name }} home"><strong>{{ app_name }}</strong></a>
       <span class="tagline">{{ tagline }}</span>
@@ -28,22 +29,8 @@
     </footer>
   </div>
 
-  <div id="loading" class="loading hidden" role="status" aria-live="polite" aria-atomic="true">
-    <div class="spinner" aria-hidden="true"></div>
-    <p class="loading-copy">Working…</p>
-  </div>
-
   <script>
     (function () {
-      var loading = document.getElementById('loading');
-      document.addEventListener('submit', function (e) {
-        var form = e.target;
-        if (!(form instanceof HTMLFormElement) || !form.dataset.loadingMessage) return;
-        var copy = loading.querySelector('.loading-copy');
-        if (copy) copy.textContent = form.dataset.loadingMessage;
-        loading.setAttribute('aria-label', form.dataset.loadingMessage);
-        loading.classList.remove('hidden');
-      });
       document.addEventListener('keydown', function (e) {
         var field = e.target;
         if (!(field instanceof HTMLTextAreaElement) || e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
@@ -117,16 +104,30 @@
         onFrame(video, function () { video.style.opacity = '1'; });
       }
 
+      function armIncoming() {
+        var incoming = clips[1];
+        if (!incoming || incoming.getAttribute('src') || !incoming.dataset.src) return;
+        incoming.src = incoming.dataset.src;
+        incoming.load();
+      }
+
       clips[0].style.zIndex = '1';
       clips[1].style.zIndex = '0';
       clips[0].style.opacity = '0';
       clips[1].style.opacity = '0';
-      play(clips[0], function (ok) { if (ok) show(clips[0]); });
+      play(clips[0], function (ok) {
+        if (ok) show(clips[0]);
+        armIncoming();
+      });
 
       function handoff() {
         if (blending) return;
         var current = clips[front];
         var incoming = clips[1 - front];
+        if (!incoming.getAttribute('src')) {
+          armIncoming();
+          return;
+        }
         blending = true;
         fromStart(incoming, function (seeked) {
           if (!seeked) {
@@ -154,7 +155,9 @@
           });
         });
       }
+      var running = true;
       function watch() {
+        if (!running) return;
         requestAnimationFrame(watch);
         if (blending) return;
         var current = clips[front];
@@ -167,6 +170,18 @@
         if (current.duration - current.currentTime > overlap) return;
         handoff();
       }
+      document.addEventListener('visibilitychange', function () {
+        if (document.hidden) {
+          running = false;
+          clips[0].pause();
+          clips[1].pause();
+          return;
+        }
+        if (running) return;
+        running = true;
+        play(clips[front], function (ok) { if (ok) show(clips[front]); });
+        requestAnimationFrame(watch);
+      });
       requestAnimationFrame(watch);
     })();
   </script>

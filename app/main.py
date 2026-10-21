@@ -10,6 +10,7 @@ deterministic demo provider behind a replaceable seam.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, Form, Request
@@ -25,6 +26,7 @@ from app.security import RateLimiter, QueryBudget, client_ip, csrf_token, verify
 from app.sessions import SessionStore
 
 _TEMPLATE_DIR = "app/templates"
+_STYLE_PATH = Path(__file__).resolve().parent / "static" / "style.css"
 
 
 def _disclosure(provider_name: str) -> str:
@@ -88,6 +90,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "csrf": csrf_token(settings.secret_key, session) if session else "",
             "demo_mode": getattr(provider, "name", "demo") == "demo",
             "disclosure": _disclosure(getattr(provider, "name", "demo")),
+            "css_version": str(int(_STYLE_PATH.stat().st_mtime)) if _STYLE_PATH.exists() else "1",
         }
         base.update(extra)
         return base

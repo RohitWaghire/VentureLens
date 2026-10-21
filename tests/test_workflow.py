@@ -40,10 +40,10 @@ class TestGrilling:
         assert "When would you hope to launch?" in r.text
         assert "Who is your primary customer" in r.text
         assert "What's your approximate start-up budget?" not in r.text
-        assert "Recommended:" in r.text
+        assert "(Recommended)" in r.text
         assert "PLANNING GUIDE" in r.text
 
-    def test_answers_advance_question_and_keep_transcript(self, client):
+    def test_answers_advance_without_replaying_history(self, client):
         token = csrf_for(client)
         client.post("/start", data={"prompt": "coffee shop", "csrf": token})
         token = csrf_for(client)
@@ -52,7 +52,8 @@ class TestGrilling:
             data={"csrf": token, "a_budget": "Under $150k"},
         )
         r = client.get("/grill")
-        assert "Under $150k" in r.text
+        assert "Under $150k" not in r.text
+        assert "What's your approximate start-up budget?" not in r.text
         assert "When would you hope to launch?" in r.text
 
     def test_grill_offer_options_derived_from_prompt(self, client):

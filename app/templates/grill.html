@@ -5,36 +5,8 @@
     <div class="interview-topline">
       <form method="post" action="/new" class="inline-form">
         <input type="hidden" name="csrf" value="{{ csrf }}">
-        <button type="submit" class="back-link"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> <span>New idea</span></button>
+        <button type="submit" class="back-link"><span>New idea</span></button>
       </form>
-      <span class="session-label"><span class="session-dot" aria-hidden="true"></span> PRIVATE SESSION</span>
-    </div>
-
-    <div class="conversation" aria-live="polite" aria-relevant="additions text">
-      {% for turn in transcript %}
-        <div class="assistant-message turn">
-          <div class="assistant-mark" aria-hidden="true">V</div>
-          <div class="turn-copy"><p class="turn-question">{{ turn.question }}</p></div>
-        </div>
-        <div class="user-message">
-          <span class="user-message-label">YOU</span>
-          <p>{{ turn.answer }}</p>
-        </div>
-      {% endfor %}
-
-      <div class="assistant-message">
-        <div class="assistant-mark" aria-hidden="true">V</div>
-        <div>
-          <p class="message-byline">VENTURELENS <span>· PLANNING GUIDE</span></p>
-          {% if confirming %}
-            <h1 id="grill-title" class="question-title">Does this match what you mean?</h1>
-            <p class="round-lead">These are the decisions so far. The brief waits until you confirm them.</p>
-          {% else %}
-            <h1 id="grill-title" class="question-title">Decisions we can settle now</h1>
-            <p class="round-lead">Questions that depend on these wait for the next round.</p>
-          {% endif %}
-        </div>
-      </div>
     </div>
 
     {% if demo_mode %}
@@ -42,91 +14,157 @@
     {% endif %}
 
     {% if confirming %}
-      <form class="reply-composer grill-dock" method="post" action="/grill" data-loading-message="Writing your brief…">
+      <form class="reply-composer grill-dock" method="post" action="/grill">
         <input type="hidden" name="csrf" value="{{ csrf }}">
         <input type="hidden" name="confirm" value="1">
-        <div class="question-card is-emerging">
-          <div class="reply-footer">
-            <span class="keyboard-hint"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 10 4 15l5 5M4 15h10a6 6 0 0 0 0-12h-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> <span>Write the brief</span></span>
-            <button type="submit" class="send-button reply-send" data-default-submit>Write my brief <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="disclosure-card">
+          <div class="disclosure-trigger">
+            <p class="message-byline">VENTURELENS <span>· PLANNING GUIDE</span></p>
+            <h1 id="grill-title" class="question-title">Does this match what you mean?</h1>
+            <p class="round-lead">These are the decisions so far. The brief waits until you confirm them.</p>
           </div>
-        </div>
-        <div class="glass-composer" aria-hidden="true"></div>
-      </form>
-    {% else %}
-      <form class="reply-composer grill-dock" method="post" action="/grill" data-loading-message="Recording this round…">
-        <input type="hidden" name="csrf" value="{{ csrf }}">
-        {% for question in questions %}
-          <fieldset class="round-question"{% if not loop.first %} hidden{% endif %}>
-            <div class="question-card{% if loop.first %} is-emerging{% endif %}">
-              <p class="round-legend">
-                <span class="question-chip">Q{{ loop.index }}</span>
-                <span class="question-copy">{{ question.text }}</span>
-              </p>
-              {% if question.recommendation %}
-                <p class="recommendation sr-only">Recommended: {{ question.recommendation }}</p>
-              {% endif %}
-              {% if question.options %}
-                <div class="option-set">
-                  {% for opt in question.options %}
-                    <label class="option-chip">
-                      <input type="radio" name="a_{{ question.id }}" value="{{ opt.value }}">
-                      <span>{{ opt.label }}{% if question.recommendation == opt.label %} (Recommended){% endif %}</span>
-                    </label>
-                  {% endfor %}
+          <div class="disclosure-body is-opening">
+            <div class="disclosure-clip">
+              <div class="disclosure-inner">
+                <div class="reply-footer">
+                  <span class="keyboard-hint"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 10 4 15l5 5M4 15h10a6 6 0 0 0 0-12h-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> <span>Write the brief</span></span>
+                  <button type="submit" class="send-button reply-send" data-default-submit>Write my brief <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
                 </div>
-              {% endif %}
-              <div class="reply-footer">
-                <span class="keyboard-hint"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 10 4 15l5 5M4 15h10a6 6 0 0 0 0-12h-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> <span>Continue when ready</span></span>
-                {% if loop.last %}
-                  <button type="submit" class="send-button reply-send" data-default-submit aria-label="Continue interview">
-                    <span>Continue</span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                  </button>
-                {% else %}
-                  <button type="button" class="send-button reply-send" data-advance>
-                    <span>Continue</span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                  </button>
-                {% endif %}
               </div>
             </div>
-            <div class="glass-composer">
-              <label for="t-{{ question.id }}" class="sr-only">Your answer</label>
-              <textarea id="t-{{ question.id }}" name="t_{{ question.id }}" rows="2"
-                placeholder="{{ question.free_text_hint or 'Or type your own answer.' }}"></textarea>
+          </div>
+        </div>
+      </form>
+    {% else %}
+      <form class="reply-composer grill-dock" method="post" action="/grill">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <div class="disclosure-card">
+          <div class="disclosure-trigger">
+            <p class="message-byline">VENTURELENS <span>· PLANNING GUIDE</span></p>
+            <h1 id="grill-title" class="question-title">Decisions we can settle now</h1>
+            <p class="round-lead">Questions that depend on these wait for the next round.</p>
+          </div>
+          <div class="disclosure-body is-opening">
+            <div class="disclosure-clip">
+              <div class="disclosure-inner" aria-live="polite">
+                {% for question in questions %}
+                  <fieldset class="round-question"{% if not loop.first %} hidden{% endif %}>
+                    <legend class="round-legend">
+                      <span class="round-legend-row">
+                        <span class="question-chip">Q{{ loop.index }}</span>
+                        <span class="question-copy">{{ question.text }}</span>
+                      </span>
+                    </legend>
+                    {% if question.options %}
+                      <div class="option-set">
+                        {% for opt in question.options %}
+                          <label class="option-chip">
+                            <input type="radio" name="a_{{ question.id }}" value="{{ opt.value }}">
+                            <span>{{ opt.label }}{% if question.recommendation == opt.label %} (Recommended){% endif %}</span>
+                          </label>
+                        {% endfor %}
+                      </div>
+                    {% endif %}
+                    <label for="t-{{ question.id }}" class="sr-only">Your answer</label>
+                    <textarea id="t-{{ question.id }}" name="t_{{ question.id }}" rows="2"
+                      placeholder="{{ question.free_text_hint or 'Or type your own answer.' }}"></textarea>
+                    <div class="reply-footer">
+                      <button type="button" class="question-back" data-back aria-label="Previous question"{% if loop.first %} disabled{% endif %}>
+                        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                      </button>
+                      <span class="keyboard-hint"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 10 4 15l5 5M4 15h10a6 6 0 0 0 0-12h-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> <span>Continue when ready</span></span>
+                      {% if loop.last %}
+                        <button type="submit" class="send-button reply-send" data-default-submit aria-label="Continue interview" disabled>
+                          <span>Continue</span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        </button>
+                      {% else %}
+                        <button type="button" class="send-button reply-send" data-advance disabled>
+                          <span>Continue</span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        </button>
+                      {% endif %}
+                    </div>
+                  </fieldset>
+                {% endfor %}
+              </div>
             </div>
-          </fieldset>
-        {% endfor %}
+          </div>
+        </div>
       </form>
       <script>
         (function () {
           var questions = Array.prototype.slice.call(document.querySelectorAll('.round-question'));
-          if (questions.length < 2) return;
+          var body = document.querySelector('.disclosure-body');
+          var form = document.querySelector('.grill-dock');
+          if (!questions.length) return;
           var index = 0;
+          var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+          function answered(question) {
+            if (!question) return false;
+            if (question.querySelector('input[type="radio"]:checked')) return true;
+            var text = question.querySelector('textarea');
+            return !!(text && text.value.trim());
+          }
+          function refresh(question) {
+            var button = question.querySelector('.reply-send');
+            if (button) button.disabled = !answered(question);
+          }
+          function openBody() {
+            if (reduce || !body) return;
+            body.classList.remove('is-opening');
+            body.classList.add('is-collapsed');
+            void body.offsetWidth;
+            body.classList.remove('is-collapsed');
+            body.classList.add('is-opening');
+          }
           function show(next) {
             index = next;
             questions.forEach(function (question, i) {
               question.hidden = i !== index;
-              var card = question.querySelector('.question-card');
-              if (!card || i !== index) return;
-              card.classList.remove('is-emerging');
-              void card.offsetWidth;
-              card.classList.add('is-emerging');
             });
+            var back = questions[index].querySelector('[data-back]');
+            if (back) back.disabled = index === 0;
+            openBody();
           }
+          questions.forEach(function (question) {
+            refresh(question);
+            question.addEventListener('input', function () { refresh(question); });
+            question.addEventListener('change', function () { refresh(question); });
+          });
           document.addEventListener('click', function (event) {
+            var back = event.target.closest('[data-back]');
+            if (back) {
+              if (back.disabled || index <= 0) return;
+              event.preventDefault();
+              show(index - 1);
+              return;
+            }
             var button = event.target.closest('[data-advance]');
-            if (!button || index >= questions.length - 1) return;
+            if (!button || button.disabled || index >= questions.length - 1) return;
             event.preventDefault();
             show(index + 1);
           });
           document.addEventListener('keydown', function (event) {
             if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
             if (!(event.target instanceof HTMLTextAreaElement)) return;
-            if (!event.target.closest('.round-question') || index >= questions.length - 1) return;
+            var question = event.target.closest('.round-question');
+            if (!question || question.hidden) return;
+            if (!answered(question) || index >= questions.length - 1) {
+              if (!answered(question)) {
+                event.preventDefault();
+                event.stopPropagation();
+              }
+              return;
+            }
             event.preventDefault();
             event.stopPropagation();
             show(index + 1);
           }, true);
+          if (form) {
+            form.addEventListener('submit', function (event) {
+              var current = questions[index];
+              if (current && !answered(current)) event.preventDefault();
+            });
+          }
         })();
       </script>
     {% endif %}

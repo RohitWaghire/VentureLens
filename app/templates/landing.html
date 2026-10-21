@@ -2,13 +2,13 @@
 {% block title %}VentureLens — A clearer view of where to grow{% endblock %}
 {% block content %}
   <section class="landing-shell" aria-labelledby="welcome-title">
-    <div class="eyebrow"><span class="eyebrow-mark" aria-hidden="true"></span> BUSINESS STRATEGY, GROUNDED IN PLACE</div>
+    <div class="eyebrow"><span class="eyebrow-mark" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M12 21s7-6.1 7-11a7 7 0 1 0-14 0c0 4.9 7 11 7 11z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.2" fill="none" stroke="currentColor" stroke-width="2"/></svg></span> BUSINESS STRATEGY, GROUNDED IN PLACE</div>
     <h1 id="welcome-title">A clearer view of<br><span>where to grow.</span></h1>
     <p class="landing-intro">Start with the idea. We’ll ask a few thoughtful questions, then help you explore the right market for it.</p>
 
     {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
 
-    <form class="prompt-composer" method="post" action="/start" data-loading-message="Starting your planning session…">
+    <form class="prompt-composer" method="post" action="/start">
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <label for="opening-prompt" class="sr-only">Describe your business idea and U.S. region</label>
       <textarea id="opening-prompt" name="prompt" rows="3" maxlength="2000" required
@@ -28,6 +28,10 @@
     </div>
 
     <div class="trust-note"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 13.4 8l4.8 1.4L13.4 10.8 12 15.6 10.6 10.8 5.8 9.4 10.6 8z" fill="currentColor"/></svg> Your answers stay in this session. Optional details can be skipped.</div>
+    <div class="prompt-sample">
+      <span class="prompt-sample-label">A PROMPT LOOKS LIKE</span>
+      <p>I have $250k and want to open a specialty coffee shop in Illinois.</p>
+    </div>
     {% if demo_mode %}<p class="demo-note">Preview mode: recommendations use illustrative demo data, not live research.</p>{% endif %}
   </section>
   <script>
