@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from tests.conftest import csrf_for, make_settings
+from tests.helpers import csrf_for, make_settings
 from app.main import create_app
 
 

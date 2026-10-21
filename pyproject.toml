@@ -25,6 +25,7 @@ packages = ["app", "app.providers"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+pythonpath = ["."]
 
 [tool.setuptools.package-data]
 "app" = ["templates/*.html", "static/*.css"]
