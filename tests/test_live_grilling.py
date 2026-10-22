@@ -123,17 +123,6 @@ def test_without_a_city_the_brief_says_qloo_was_not_asked():
     assert not any("/v2/insights" in url for url in calls)
 
 
-def test_a_category_answer_is_searched_with_the_idea():
-    from app.providers.live import _search_phrases
-
-    phrases = _search_phrases(
-        BusinessProfile(idea="dropshipping store"),
-        "",
-        [GrillTurn(question_id="focus", question="What will you sell?", answer="Home goods")],
-    )
-    assert "goods" in phrases
-
-
 def test_a_grocery_shop_and_a_yoga_studio_are_not_asked_the_same_question():
     def fetch(method, url, headers, body, timeout):
         user = json.loads(body)["messages"][1]["content"]

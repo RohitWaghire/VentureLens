@@ -1,8 +1,10 @@
-"""Live report writer: Qloo taste signals, then a model brief.
+"""Live report writer. The model mediates between the founder and Qloo.
 
-``write_report`` sends the idea and place to Qloo, then sends those signals
-plus the answers to an OpenAI-compatible chat model. VentureLens does not
-store either response.
+``write_report`` asks the model to name a place category from the idea and
+the transcript. Qloo is searched for that phrase. Only place-category tags
+are kept, and when several match the model picks one. Insights uses that tag
+and the city. The model then writes the brief and a short note from the
+places Qloo returned. VentureLens does not store either response.
 
 The HTTP transport is injected so tests can exercise this adapter with no network.
 """
@@ -39,6 +41,28 @@ _CAVEAT = (
     "person, foot traffic, or profit. The narrative was written by the configured "
     "model from those signals and your answers. VentureLens keeps them only for "
     "this session and does not delete them from Qloo or the model provider."
+)
+
+_CATEGORY_PROMPT = (
+    "You choose the Qloo place-category search phrase for one business. "
+    "Return JSON {\"category\": \"...\"}. "
+    "Use 1 to 3 words from the business itself. "
+    "There is no fixed list of business types. "
+    "Leave out the city, the budget, the timeline, and who the customers are. "
+    "Name the place the way a directory would. "
+    "A food business is a restaurant when that is the place, so a ramen shop is a ramen restaurant. "
+    "Keep shop when the business is a shop, such as a coffee shop or a chocolate shop. "
+    "A bar is a bar, not a barber shop. "
+    "A roofing business is a roofing contractor, not a supply store. "
+    "A chocolate business that is a shop is a chocolate shop, not a manufacturer."
+)
+
+_PICK_PROMPT = (
+    "Pick one Qloo place-category tag for this business. "
+    "Return JSON {\"id\": \"<id from the list>\"}. "
+    "Copy an id exactly. If none name this business, return {\"id\": \"\"}. "
+    "Prefer the tag that names the business over a parent category, a manufacturer, or a supply variant. "
+    "A bar is not a barber shop."
 )
 
 
@@ -101,7 +125,7 @@ class LiveProvider(Provider):
         opening: str,
         transcript: List[GrillTurn],
     ) -> Report:
-        signals = self._taste(profile, transcript, opening)
+        signals, gap = self._taste(profile, transcript, opening)
         narrative = self._narrate(profile, opening, transcript, signals)
         report = narrative or answers_report(profile, transcript)
         report.sections = [
@@ -109,85 +133,132 @@ class LiveProvider(Provider):
             for section in report.sections
             if section.heading.strip().lower() not in {"taste signals", "what similar places suggest"}
         ]
-        report.sections.append(self._readable_places(profile, signals))
+        report.sections.append(self._readable_places(profile, signals, gap))
         report.caveat = _CAVEAT
         return report
 
-    def _taste(self, profile: BusinessProfile, transcript: List[GrillTurn], opening: str = "") -> list[dict]:
+    def _taste(
+        self,
+        profile: BusinessProfile,
+        transcript: List[GrillTurn],
+        opening: str = "",
+    ) -> tuple[list[dict], str]:
         if not self.settings.qloo_api_key:
             raise ProviderError("Set VL_QLOO_API_KEY before using the live provider.")
-        phrases = _search_phrases(profile, opening, transcript)
         location = _location(profile, transcript, opening)
-        self._place_gap = ""
         if not location:
-            self._place_gap = "no-city"
-            return []
-        self._qloo_down = False
-        idea_words = _distinctive_words(
-            " ".join([profile.idea or "", opening or ""] + [turn.answer for turn in transcript])
-        )
-        tags = _ranked_tags(
-            [(phrase, self._tags_for(phrase)) for phrase in phrases],
-            idea_words,
-        )
-        if self._qloo_down:
-            self._place_gap = "down"
-            return []
-        if not tags:
-            self._place_gap = "no-tags"
-            return []
-        # A named city stays on the request. An empty city is not a reason to
-        # search the world; the only wider call is the same state, and only
-        # places near that city are kept.
-        for tag in tags[:2]:
-            places = self._local_places(tag["id"], location)
-            if self._qloo_down:
-                self._place_gap = "down"
-                return []
-            if places:
-                return places
-        self._place_gap = "no-places"
-        return []
-
-    def _insights(self, tag_id: str, location: str) -> tuple[int, object]:
-        status, payload = self._qloo_get(
-            "/v2/insights",
-            place_insights_params(tag_id, location),
-        )
-        _raise_for_qloo_status(status)
-        return status, payload
-
-    def _local_places(self, tag_id: str, location: str) -> list[dict]:
-        status, payload = self._insights(tag_id, location)
-        if self._qloo_down:
-            return []
-        center = _resolved_locality(payload)
-        places = _entities(payload) if status == 200 else []
-        if not _is_city(center):
-            return _dedupe_places(places)
-        places = _within_miles(places, center, _CITY_MILES)
-        if places:
-            return _dedupe_places(places)
-        state = str(center.get("state") or "")
-        if not state or state.lower() == location.lower():
-            return []
-        status, wider = self._insights(tag_id, state)
-        if self._qloo_down or status != 200:
-            return []
-        return _dedupe_places(_within_miles(_entities(wider), center, _CITY_MILES))
-
-    def _tags_for(self, phrase: str) -> list[dict]:
-        if getattr(self, "_qloo_down", False):
-            return []
+            return [], "no-city"
+        phrase = self._category_phrase(profile, opening, transcript)
+        if not phrase:
+            return [], "no-category"
         status, payload = self._qloo_get(
             "/v2/tags",
             {"filter.query": phrase[:80], "take": "8"},
         )
-        _raise_for_qloo_status(status)
+        if status == 0:
+            return [], "down"
         if status != 200:
-            log.warning("qloo tag lookup returned %s", status)
-            return []
-        return _tags(payload)
+            return [], "tag-error"
+        tags = [tag for tag in _tags(payload) if _is_category_place(tag)]
+        chosen, reason = self._choose_tag(profile, opening, tags)
+        if chosen is None:
+            return [], reason
+        # A named city stays on the request. An empty city is not a reason to
+        # search the world; the only wider call is the same state, and only
+        # places near that city are kept.
+        return self._local_places(chosen["id"], location)
+
+    def _category_phrase(
+        self,
+        profile: BusinessProfile,
+        opening: str,
+        transcript: List[GrillTurn],
+    ) -> str:
+        """The place category the model names. Answer words are not extra searches."""
+        parsed = self._chat(
+            [
+                {"role": "system", "content": _CATEGORY_PROMPT},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "idea": profile.idea,
+                            "opening": opening,
+                            "region": profile.region,
+                            "answers": [
+                                {"question": turn.question, "answer": turn.answer}
+                                for turn in transcript
+                            ],
+                        }
+                    ),
+                },
+            ]
+        )
+        if not isinstance(parsed, dict):
+            return ""
+        return " ".join(str(parsed.get("category") or "").split())[:80]
+
+    def _choose_tag(
+        self,
+        profile: BusinessProfile,
+        opening: str,
+        tags: list[dict],
+    ) -> tuple[Optional[dict], str]:
+        """One confirmed place category. An id the model invents is not used."""
+        if not tags:
+            return None, "no-tags"
+        if len(tags) == 1:
+            return tags[0], ""
+        parsed = self._chat(
+            [
+                {"role": "system", "content": _PICK_PROMPT},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "idea": profile.idea,
+                            "opening": opening,
+                            "tags": [{"id": tag["id"], "name": tag["name"]} for tag in tags],
+                        }
+                    ),
+                },
+            ]
+        )
+        if not isinstance(parsed, dict):
+            return None, "no-choice"
+        wanted = str(parsed.get("id") or "").strip()
+        chosen = next((tag for tag in tags if tag["id"] == wanted), None)
+        if chosen is None:
+            return None, "no-match"
+        return chosen, ""
+
+    def _insights(self, tag_id: str, location: str) -> tuple[int, object]:
+        return self._qloo_get("/v2/insights", place_insights_params(tag_id, location))
+
+    def _local_places(self, tag_id: str, location: str) -> tuple[list[dict], str]:
+        status, payload = self._insights(tag_id, location)
+        if status == 0:
+            return [], "down"
+        if status != 200:
+            return [], "insights-error"
+        center = _resolved_locality(payload)
+        places = _entities(payload)
+        if not _is_city(center):
+            kept = _dedupe_places(places)
+            return (kept, "") if kept else ([], "no-places")
+        places = _within_miles(places, center, _CITY_MILES)
+        if places:
+            return _dedupe_places(places), ""
+        state = str(center.get("state") or "")
+        if not state or state.lower() == location.lower():
+            return [], "no-places"
+        status, wider = self._insights(tag_id, state)
+        if status == 0:
+            return [], "down"
+        if status != 200:
+            return [], "insights-error"
+        kept = _dedupe_places(_within_miles(_entities(wider), center, _CITY_MILES))
+        return (kept, "") if kept else ([], "no-places")
 
     def _qloo_get(self, path: str, params: dict, timeout: float | None = None) -> tuple[int, object]:
         if path.startswith("/v2/insights"):
@@ -204,8 +275,10 @@ class LiveProvider(Provider):
             )
         except ProviderError:
             log.warning("qloo request failed for %s", path)
-            self._qloo_down = True
             return 0, None
+        if status != 200:
+            log.warning("qloo %s returned %s: %s", path, status, _body_snippet(raw))
+        _raise_for_qloo_status(status)
         return status, _json_bytes(raw)
 
     def _questions_for_idea(
@@ -276,11 +349,16 @@ class LiveProvider(Provider):
             asked_ids.add(question_id)
         return questions
 
-    def _readable_places(self, profile: BusinessProfile, signals: list[dict]) -> ReportSection:
+    def _readable_places(
+        self,
+        profile: BusinessProfile,
+        signals: list[dict],
+        gap: str,
+    ) -> ReportSection:
         """Ask the model to turn raw Qloo places into a short founder note."""
         heading = "What similar places suggest"
         if not signals:
-            return ReportSection(heading=heading, body=_missing_places(getattr(self, "_place_gap", "")))
+            return ReportSection(heading=heading, body=_missing_places(gap))
         parsed = self._chat(
             [
                 {
@@ -459,28 +537,6 @@ def _chat_payload(model: str, messages: list) -> dict:
     return payload
 
 
-def _search_phrases(
-    profile: BusinessProfile,
-    opening: str = "",
-    transcript: Optional[List[GrillTurn]] = None,
-) -> list[str]:
-    """The idea's own words, longest first, then words from the answers."""
-    idea = (profile.idea or opening or "").strip()
-    words = _content_words(idea)
-    seen = set(words)
-    for turn in transcript or []:
-        for word in _content_words(turn.answer):
-            if word in seen:
-                continue
-            seen.add(word)
-            words.append(word)
-    return words[:4] or ["local business"]
-
-
-def _content_words(phrase: str) -> list[str]:
-    return sorted(_query_words(phrase), key=lambda word: (-len(word), word))
-
-
 def _location(profile: BusinessProfile, transcript: List[GrillTurn], opening: str = "") -> str:
     if (profile.region or "").strip():
         return _qloo_location(profile.region)
@@ -490,7 +546,6 @@ def _location(profile: BusinessProfile, transcript: List[GrillTurn], opening: st
     if stated:
         return _qloo_location(stated)
     for turn in transcript:
-        question = turn.question.lower()
         answer = (turn.answer or "").strip()
         if not answer or answer.lower() in _GENERIC_ANSWERS:
             continue
@@ -525,10 +580,35 @@ def _missing_places(reason: str) -> str:
         )
     if reason == "down":
         return "Qloo could not be reached, so this brief has no place list."
+    if reason == "no-category":
+        return (
+            "The planning guide could not name a place category for this idea, "
+            "so Qloo was not asked for places."
+        )
+    if reason == "tag-error":
+        return "Qloo's category lookup failed, so this brief has no place list."
+    if reason == "no-tags":
+        return "Qloo returned no place category for this idea, so this brief has no place list."
+    if reason == "no-choice":
+        return (
+            "The planning guide could not choose a Qloo place category, "
+            "so places were not requested."
+        )
+    if reason == "no-match":
+        return (
+            "None of Qloo's place categories named this business, "
+            "so places were not requested."
+        )
+    if reason == "insights-error":
+        return "Qloo's place request failed, so this brief has no place list."
     return (
         "Qloo returned no place affinities for this idea and location. "
         "Treat the rest of the brief as based on your answers."
     )
+
+
+def _body_snippet(raw: bytes) -> str:
+    return raw[:180].decode("utf-8", errors="replace").replace("\n", " ").strip()
 
 
 def _qloo_location(value: str) -> str:
@@ -552,18 +632,7 @@ _GENERIC_ANSWERS = {
 }
 
 
-_MEDIA_MARKERS = (
-    ":media:",
-    ":movie:",
-    ":music:",
-    ":artist:",
-    ":book:",
-    ":tv",
-    ":podcast:",
-    ":video_game:",
-    ":brand:",
-    ":person:",
-)
+_CITY_MILES = 40
 
 
 def place_insights_params(tag_id: str, location: str) -> dict:
@@ -594,115 +663,7 @@ def _reject_bad_insights(params: dict) -> None:
 
 
 def _is_category_place(tag: dict) -> bool:
-    ident = str(tag.get("id") or "")
-    kind = str(tag.get("type") or "")
-    return ident.startswith("urn:tag:category:place:") or kind == "urn:tag:category:place"
-
-
-def _is_usable_tag(tag: dict) -> bool:
-    ident = str(tag.get("id") or "")
-    if not ident.startswith("urn:tag:"):
-        return False
-    blob = f"{ident} {tag.get('type', '')}".lower()
-    return not any(marker in blob for marker in _MEDIA_MARKERS)
-
-
-_GENERIC_QUERY_WORDS = {
-    "store", "shop", "place", "local", "business", "company", "service", "services",
-    "repair", "repairs", "food", "with", "from", "market", "specialty", "special",
-    "neighborhood", "premium", "boxed", "handmade", "handcrafted", "mobile",
-    "custom", "residential", "commercial", "small", "family", "used",
-}
-
-# Length alone is not enough: "tea", "gym", and "bar" are real categories.
-_SHORT_FUNCTION_WORDS = {
-    "the", "and", "for", "but", "not", "you", "our", "its", "are", "was",
-    "can", "has", "had", "her", "his", "who", "how", "why", "any", "all",
-    "out", "off", "too", "via", "per", "let", "she", "him", "own", "may",
-    "did", "get", "got", "use", "new", "old", "one", "two",
-}
-
-
-_ALIASES = {
-    "coffee": ["cafe", "café", "espresso", "coffeehouse"],
-    "cafe": ["coffee", "espresso"],
-    "pizza": ["pizzeria"],
-    "pizzeria": ["pizza"],
-    "chocolate": ["chocolatier", "confectionery", "candy"],
-    "chocolates": ["chocolate"],
-}
-
-
-def _query_words(phrase: str) -> set[str]:
-    return {
-        word
-        for word in re.findall(r"[a-z]+", phrase.lower())
-        if len(word) >= 3
-        and word not in _GENERIC_QUERY_WORDS
-        and word not in _SHORT_FUNCTION_WORDS
-    }
-
-
-def _distinctive_words(phrase: str) -> set[str]:
-    words = _query_words(phrase)
-    extra = set()
-    for word in words:
-        extra.update(_ALIASES.get(word, []))
-    return words | extra
-
-
-_FORM_WORDS = {"shop", "store", "cafe", "café", "artisan", "bakery", "contractor", "service"}
-_INDUSTRIAL_MARKERS = ("manufacturer", "wholesaler", "factory", "plant", "industrial")
-_CITY_MILES = 40
-
-
-def _tag_rank(tag: dict, words: set[str]) -> Optional[tuple]:
-    """Higher is a closer category. A shop beats its parent; a contractor beats a supply store."""
-    ident = str(tag.get("id") or "")
-    suffix = ident.rsplit(":", 1)[-1].replace("_", " ")
-    label = f"{tag.get('name', '')} {suffix}".lower()
-    overlap = sum(1 for word in words if word in label)
-    if overlap <= 0:
-        return None
-    extra = [
-        word
-        for word in suffix.split()
-        if not any(wanted in word or word in wanted for wanted in words)
-    ]
-    form = sum(1 for word in extra if word in _FORM_WORDS)
-    unrelated = sum(1 for word in extra if word not in _FORM_WORDS)
-    industrial = 1 if any(marker in suffix for marker in _INDUSTRIAL_MARKERS) else 0
-    return (overlap, form, -unrelated, -industrial)
-
-
-def _ranked_tags(
-    groups: list[tuple[str, list[dict]]],
-    required: Optional[set[str]] = None,
-) -> list[dict]:
-    """Category tags that match the business, closest category first."""
-    ranks: dict[str, tuple] = {}
-    chosen: dict[str, dict] = {}
-    for phrase, tags in groups:
-        words = required or _distinctive_words(phrase)
-        for tag in tags:
-            ident = str(tag.get("id") or "")
-            if not ident or not _is_usable_tag(tag) or not _is_category_place(tag):
-                continue
-            if required and _tag_rank(tag, required) is None:
-                continue
-            rank = _tag_rank(tag, words)
-            if rank is None:
-                continue
-            if ident not in ranks or rank > ranks[ident]:
-                ranks[ident] = rank
-                chosen[ident] = tag
-    return [chosen[ident] for ident in sorted(ranks, key=ranks.get, reverse=True)]
-
-
-def _best_tag(groups: list[tuple[str, list[dict]]]) -> Optional[dict]:
-    """The tag whose name matches a concept we actually asked Qloo about."""
-    ranked = _ranked_tags(groups)
-    return ranked[0] if ranked else None
+    return str(tag.get("id") or "").startswith("urn:tag:category:place:")
 
 
 def _llm_base(settings: Settings) -> str:

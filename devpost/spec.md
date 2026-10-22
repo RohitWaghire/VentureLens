@@ -6,7 +6,7 @@ status: draft
 # VentureLens — Technical Spec
 
 ## How This Works, In Plain Language
-The app is one Python web server. Pages are rendered on the server, not as a separate frontend app. A session in memory holds the idea, the questions and answers, and the brief. A provider sits behind one seam. The demo provider needs no keys and writes the brief from the answers. The live provider, if configured, may ask Qloo for places and a model to write the brief. The browser never receives API keys.
+The app is one Python web server. Pages are rendered on the server, not as a separate frontend app. A session in memory holds the idea, the questions and answers, and the brief. A provider sits behind one seam. The live provider asks the model to name a place category, asks Qloo for places of that category, and asks the model to write the brief. Tests inject a fake transport and need no keys. The browser never receives API keys.
 
 This shape is the discovery dialogue's "one FastAPI app with a replaceable provider," kept smaller than city and neighborhood research.
 
@@ -60,11 +60,11 @@ PRD ref: `prd.md > Screens and Layout`.
 PRD ref: `prd.md > Session safety`.
 
 ### Planning loop
-`app/planning.py` moves a session from the prompt, to a question, to confirm, to the brief. `app/providers/grilling.py` parses the opening prompt and chooses the next demo questions.
+`app/planning.py` moves a session from the prompt, to a question, to confirm, to the brief. `app/providers/grilling.py` parses the opening prompt. The model chooses the next question.
 PRD ref: `prd.md > Grilling` and `prd.md > Confirm and brief`.
 
 ### Providers
-`app/providers/base.py` is the seam. `demo.py` needs no credentials. `live.py` calls Qloo and the configured model when `VL_PROVIDER` is not `demo`.
+`app/providers/base.py` is the seam. `live.py` is the only adapter. The model names the place category, Qloo is queried for that category, and the model writes the brief. `VL_PROVIDER` is ignored.
 PRD ref: `prd.md > Product Decisions`.
 
 ### Brief export
@@ -93,9 +93,8 @@ VentureLens/
 │   ├── markdown.py          # download
 │   ├── providers/
 │   │   ├── base.py          # provider seam
-│   │   ├── demo.py          # no credentials
-│   │   ├── live.py          # Qloo and model
-│   │   ├── grilling.py      # prompt parsing and demo questions
+│   │   ├── live.py          # model, then Qloo, then the brief
+│   │   ├── grilling.py      # opening-prompt parsing
 │   │   └── data.py          # U.S. state names used by the parser
 │   ├── templates/           # landing, grill, report, error
 │   └── static/style.css
@@ -107,30 +106,28 @@ VentureLens/
 ```
 
 ## External Services and Dependencies
-Demo mode calls none.
+The running app calls both services. Tests do not.
 
-Live mode, only when configured:
-
-- Qloo insights. Hackathon base URL `https://hackathon.api.qloo.com`. The server sends a place-category tag and a location query. Header `X-Api-Key` from `VL_QLOO_API_KEY`. Documentation is the hackathon kit the discovery dialogue named, not a CLI.
-- An OpenAI-compatible chat completion for grilling questions and the brief narrative. `VL_LLM_API_KEY`, `VL_LLM_BASE_URL`, and `VL_LLM_MODEL`. The key stays on the server.
+- Qloo. Hackathon base URL `https://hackathon.api.qloo.com`. The model names a place category. The server searches `/v2/tags` for that phrase, keeps a tag whose id starts with `urn:tag:category:place:`, and sends it to `/v2/insights` with the city. Header `X-Api-Key` from `VL_QLOO_API_KEY`. Documentation is the hackathon kit the discovery dialogue named, not a CLI.
+- An OpenAI-compatible chat completion. The model grills, names the Qloo category, and writes the brief. `VL_LLM_API_KEY`, `VL_LLM_BASE_URL`, and `VL_LLM_MODEL`. The key stays on the server. GPT-6 Luna is the configured model.
 
 Timeouts and the session and global query budgets bound cost. Exact vendor prices were left open in the discovery dialogue and are still unset.
 
 ## Important Failure Modes
 
-- **Live Qloo or the model times out or returns nothing** → the brief still explains that no place affinities came back, or the app shows the provider error. Keys are not shown.
+- **Qloo or the model cannot be reached, or the key is refused** → the brief says Qloo could not be reached, or the app shows the provider error. A failed category lookup and a failed place request are said separately from an empty place list. Keys are not shown.
 - **The research budget is spent** → the founder sees a budget message instead of a hung request.
 - **The session expired** → the next click returns them to the start. Nothing is saved.
 
 ## What Was Simplified and Why
 
-- **A demo provider** instead of requiring Qloo and a model for every run — a reviewer can record the proof of concept with no keys. The live provider is the fuller path and needs credentials and vendor terms.
+- **No demo provider.** The build dialogue started with a credential-free demo. The app now always uses the live provider. Tests inject a fake transport, so they still need no keys. A public demo needs credentials and vendor terms.
 - **Prose brief** instead of the discovery dialogue's neighborhood scorecard — the build dialogue removed the scorecard so missing evidence would not become a number.
 - **In-memory sessions** instead of a database — the discovery dialogue already cut accounts and saved plans. A database would add persistence the product refused.
 
 ## Decisions and Open Issues
-The learner chose, in the discovery dialogue, one Python server, no accounts, Qloo as an aggregate signal, and a downloadable brief. The build dialogue chose the demo seam and dropped the scorecard. Those are recorded above. An agent assumption is not attributed beyond that.
+The learner chose, in the discovery dialogue, one Python server, no accounts, Qloo as an aggregate signal, and a downloadable brief. The build dialogue dropped the scorecard. The live model is GPT-6 Luna, and it mediates Qloo: it names the place category, then writes the brief from the places Qloo returns. An agent assumption is not attributed beyond that.
 
-One uncertainty the discovery dialogue left open, and that is still open: the exact live model and the Qloo retention terms before a public demo sends real ideas to those services. The demo path does not depend on it. Check `.env.example` and the provider's terms before turning `VL_PROVIDER` off `demo`.
+One uncertainty the discovery dialogue left open, and that is still open: Qloo's retention terms before a public demo sends real ideas to that service. Check `.env.example` and the provider's terms before a public demo.
 
 Carried from `prd.md > Open Questions`: city and neighborhood research stays deferred. No spec work should start it unless the scope is reopened.

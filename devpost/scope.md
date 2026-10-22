@@ -25,10 +25,10 @@ The discovery dialogue named the tagline "A clearer view of where to grow." The 
 They built VentureLens in this shape and asked for the planning files to be taken from that work, because the skill files were never written during the original dialogue.
 
 ## What "Working" Looks Like
-On one screen, with no account: type the coffee-shop prompt, answer the grilling, confirm, and see a brief that downloads as Markdown. The demo path does this with no API keys. When the live provider is configured, the same path can add Qloo places for that idea and city. A reviewer can see this in a short screen recording. A public GitHub repository is the other submission requirement. Deployment is optional.
+On one screen, with no account: type the coffee-shop prompt, answer the grilling, confirm, and see a brief that downloads as Markdown. A running demo needs the model and Qloo keys. Tests walk the same path with a fake transport and no keys. A reviewer can see the walk-through in a short screen recording. A public GitHub repository is the other submission requirement. Deployment is optional.
 
 ## The POC Boundary
-In: the opening prompt, adaptive grilling with shortlisted options and a typed answer, a confirm step, a written brief, Markdown download, an in-memory session that expires, and a credential-free demo provider. The live Qloo and model provider is in only as an optional seam on that same flow.
+In: the opening prompt, adaptive grilling with shortlisted options and a typed answer, a confirm step, a written brief, Markdown download, an in-memory session that expires, and the live provider. Luna names the Qloo place category and writes the brief. Tests inject a fake transport.
 
 ## Later
 From the discovery dialogue, not in the running proof of concept: three ranked cities inside the stated region, a neighborhood shortlist, inline source citations on research claims, and a follow-up conversation that does not change the downloaded brief.
