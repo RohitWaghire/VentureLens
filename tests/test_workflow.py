@@ -10,6 +10,53 @@ from app.main import create_app
 
 
 class TestEntry:
+    def test_health_does_not_open_a_session_or_use_the_rate_limit(self):
+        app = create_app(make_settings(rate_limit_per_ip=1))
+        with TestClient(app) as client:
+            first = client.get("/health")
+            second = client.get("/health")
+            assert first.status_code == 200
+            assert first.text == "ok"
+            assert second.status_code == 200
+            assert "vl_session" not in first.headers.get("set-cookie", "")
+            assert app.state.store._sessions == {}
+            # The single allowed POST is still available after the probes.
+            allowed = client.post(
+                "/start",
+                data={"prompt": "coffee shop", "csrf": "nope"},
+                headers={"origin": "http://localhost:8000"},
+            )
+            assert allowed.status_code == 403
+            assert "Invalid session token" in allowed.text
+            blocked = client.post(
+                "/start",
+                data={"prompt": "coffee shop", "csrf": "nope"},
+                headers={"origin": "http://localhost:8000"},
+            )
+            assert blocked.status_code == 429
+
+    def test_render_origin_can_post(self, monkeypatch):
+        monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://venturelens.onrender.com/")
+        settings = make_settings()
+        assert "https://venturelens.onrender.com" in settings.allowed_origins
+        assert "http://localhost:8000" in settings.allowed_origins
+        app = create_app(settings)
+        with TestClient(app) as client:
+            allowed = client.post(
+                "/start",
+                data={"prompt": "coffee shop", "csrf": "nope"},
+                headers={"origin": "https://venturelens.onrender.com"},
+            )
+            rejected = client.post(
+                "/start",
+                data={"prompt": "coffee shop", "csrf": "nope"},
+                headers={"origin": "https://evil.example"},
+            )
+        assert allowed.status_code == 403
+        assert "Invalid session token" in allowed.text
+        assert rejected.status_code == 403
+        assert rejected.text == "Origin not allowed"
+
     def test_landing_renders_composer(self, client):
         r = client.get("/")
         assert r.status_code == 200

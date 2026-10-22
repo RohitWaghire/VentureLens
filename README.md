@@ -62,11 +62,39 @@ commit a real secret. Key knobs:
 | `VL_COOKIE_SECURE` | Enable when serving over HTTPS. |
 | `VL_LLM_*`, `VL_QLOO_*` | Model and Qloo credentials. Required. |
 
+## Deploy
+
+The public demo is one free Render web service, defined in `render.yaml`.
+Keep it at one instance. Render stops that process after 15 minutes without
+a visitor. The next open takes about a minute while Render starts it again,
+and the new process has an empty session, so that visit begins at the landing
+page. A walk-through that stays active keeps the same process, and the
+questions and brief remain available. The research budget also starts over
+when the process starts over.
+
+Render checks `GET /health`. Render sets `RENDER_EXTERNAL_URL`, and the app
+adds that origin to the allowlist. The blueprint turns on `VL_COOKIE_SECURE`
+and sets `VL_GLOBAL_QUERY_BUDGET` to 400 for one running process. Render
+generates `VL_SECRET_KEY`. Set `VL_QLOO_API_KEY` and `VL_LLM_API_KEY` in the
+Render dashboard. Leave `VL_TRUSTED_PROXIES` empty.
+
+A redeploy also starts a new process and drops in-memory sessions. Delete or
+suspend the service after November 5, 2026, when Qloo judging ends.
+
+### Note for judges
+
+VentureLens is hosted on Render’s free tier. If nobody has opened it for
+about 15 minutes, the first visit takes about a minute while the app starts.
+Render shows its own loading page during that wait. Wait until the
+VentureLens page appears, then begin. That start is a fresh session. Once
+the page is up, continue through the questions; a pause longer than 15
+minutes returns you to the beginning.
+
 ## Architecture
 
 - **`app/main.py`** — FastAPI app, server-rendered UI, and the grilling/report
-  routes (`/`, `/start`, `/grill`, `/report`, `/report/download`, `/new`,
-  `/close`).
+  routes (`/`, `/health`, `/start`, `/grill`, `/report`, `/report/download`,
+  `/new`, `/close`).
 - **`app/providers/`** — the live provider. The model asks the next question.
   `write_report` asks the model to name a place category, asks Qloo for places
   of that category, then asks the model to write the brief.
