@@ -31,6 +31,42 @@
 
   <script>
     (function () {
+      document.addEventListener('submit', function (event) {
+        var form = event.target;
+        if (!(form instanceof HTMLFormElement) || !form.classList.contains('grill-dock')) return;
+        if (event.defaultPrevented) return;
+        event.preventDefault();
+        fetch(form.action, {
+          method: 'POST',
+          body: new FormData(form),
+          credentials: 'same-origin',
+          redirect: 'follow'
+        }).then(function (response) {
+          var url = new URL(response.url, location.origin);
+          if (!response.ok || url.pathname !== '/grill') {
+            location.assign(response.url);
+            return null;
+          }
+          return response.text();
+        }).then(function (html) {
+          if (!html) return;
+          var doc = new DOMParser().parseFromString(html, 'text/html');
+          var next = doc.querySelector('#main-content');
+          var current = document.getElementById('main-content');
+          if (!next || !current) {
+            location.assign('/grill');
+            return;
+          }
+          current.replaceWith(next);
+          next.querySelectorAll('script').forEach(function (old) {
+            var created = document.createElement('script');
+            created.text = old.textContent;
+            old.replaceWith(created);
+          });
+        }).catch(function () {
+          form.submit();
+        });
+      });
       document.addEventListener('keydown', function (e) {
         var field = e.target;
         if (!(field instanceof HTMLTextAreaElement) || e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
