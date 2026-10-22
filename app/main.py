@@ -49,6 +49,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def safety(request: Request, call_next):
+        # Probes must not open a session or fill the shared rate-limit window.
+        if request.url.path == "/health":
+            return await call_next(request)
         ip = client_ip(request, settings.trusted_proxies)
         if request.method in ("POST", "PUT", "PATCH", "DELETE"):
             if not origin_allowed(request, settings.allowed_origins):
@@ -112,6 +115,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return RedirectResponse("/report", status_code=303)
 
     # --- entry ---------------------------------------------------------------
+    @app.get("/health")
+    def health():
+        return PlainTextResponse("ok")
+
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request):
         session = session_only(request) or store.create()

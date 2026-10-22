@@ -1,0 +1,31 @@
+# One free instance. Render stops it after 15 idle minutes. The next visit
+# waits about a minute and starts with an empty session.
+# API keys are entered in the Render dashboard. Do not put secret values here.
+services:
+  - type: web
+    name: venturelens
+    runtime: python
+    plan: free
+    numInstances: 1
+    buildCommand: pip install .
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.11"
+      - key: VL_COOKIE_SECURE
+        value: "1"
+      - key: VL_QLOO_BASE_URL
+        value: https://hackathon.api.qloo.com
+      - key: VL_LLM_PROVIDER
+        value: openai
+      - key: VL_LLM_MODEL
+        value: gpt-6-luna
+      - key: VL_GLOBAL_QUERY_BUDGET
+        value: "400"
+      - key: VL_SECRET_KEY
+        generateValue: true
+      - key: VL_QLOO_API_KEY
+        sync: false
+      - key: VL_LLM_API_KEY
+        sync: false

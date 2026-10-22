@@ -42,6 +42,10 @@ class Settings:
             ).split(",")
             if o.strip()
         ]
+        # Render publishes the service URL. Browsers send it as the form Origin.
+        external = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
+        if external and external not in self.allowed_origins:
+            self.allowed_origins.append(external)
 
         # Provider timeouts (bounded costs and latency).
         self.qloo_timeout_seconds = float(os.getenv("VL_QLOO_TIMEOUT_SECONDS", "20"))
