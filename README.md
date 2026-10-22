@@ -9,7 +9,7 @@ the user (and can be downloaded as Markdown).
 
 > **Status:** Hackathon MVP. Grilling questions come from the configured model,
 > one at a time. The brief uses those answers and Qloo places. Both keys are
-> required. There is no demo mode.
+> required.
 
 ## Key behaviors
 
