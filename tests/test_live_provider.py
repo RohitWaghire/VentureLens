@@ -17,7 +17,7 @@ def test_qloo_uses_a_place_tag_and_the_answered_location():
 
     def fetch(method, url, headers, body, timeout):
         if method != "GET":
-            return _brief()
+            return _answer_model(body)
         calls.append(url)
         if "/v2/tags" in url:
             return 200, json.dumps(
@@ -89,10 +89,12 @@ def test_gpt6_luna_brief_omits_temperature_and_keeps_qloo_places():
                 }
             }
             return 200, json.dumps(payload).encode()
-        captured["url"] = url
-        captured["body"] = json.loads(body)
-        captured["auth"] = headers.get("Authorization")
-        return _brief()
+        payload = json.loads(body)
+        if "small-business brief" in payload["messages"][0]["content"]:
+            captured["url"] = url
+            captured["body"] = payload
+            captured["auth"] = headers.get("Authorization")
+        return _answer_model(body)
 
     report = LiveProvider(settings, fetch).write_report(
         BusinessProfile(idea="grocery shop", region="New York"),
@@ -115,7 +117,7 @@ def test_qloo_timeout_still_writes_the_brief():
     def fetch(method, url, headers, body, timeout):
         if method == "GET":
             raise ProviderError("The taste service or the model could not be reached.")
-        return _brief()
+        return _answer_model(body)
 
     report = LiveProvider(settings, fetch).write_report(
         BusinessProfile(idea="grocery shop", region="New York"),
@@ -153,27 +155,13 @@ def test_model_rewrites_qloo_places_without_raw_tags():
                     }
                 }
             ).encode()
-        user = json.loads(body)["messages"][-1]["content"]
-        if '"places"' in user:
-            return 200, json.dumps(
-                {
-                    "choices": [
-                        {
-                            "message": {
-                                "content": json.dumps(
-                                    {
-                                        "body": (
-                                            "Food Bazaar is a neighborhood supermarket. "
-                                            "Qloo is pointing at grocery stores like this, not a demand forecast."
-                                        )
-                                    }
-                                )
-                            }
-                        }
-                    ]
-                }
-            ).encode()
-        return _brief()
+        return _answer_model(
+            body,
+            place_note=(
+                "Food Bazaar is a neighborhood supermarket. "
+                "Qloo is pointing at grocery stores like this, not a demand forecast."
+            ),
+        )
 
     report = LiveProvider(settings, fetch).write_report(
         BusinessProfile(idea="grocery shop", region="New York"),
@@ -187,60 +175,83 @@ def test_model_rewrites_qloo_places_without_raw_tags():
     assert "Impulse visit" not in section.body
 
 
-def test_search_phrases_come_from_the_idea_itself():
-    from app.providers.live import _search_phrases
+def test_the_tag_search_uses_the_phrase_the_model_names():
+    settings = _settings()
+    queries = []
+    asked = {}
 
-    chocolate = _search_phrases(
-        BusinessProfile(idea="boxed chocolate shop"),
-        "I want a boxed chocolate shop in New Hampshire",
+    def fetch(method, url, headers, body, timeout):
+        if method != "GET":
+            payload = json.loads(body)
+            if "place-category search phrase" in payload["messages"][0]["content"]:
+                asked["user"] = payload["messages"][-1]["content"]
+                return _model({"category": "bar"})
+            return _brief()
+        if "/v2/tags" in url:
+            queries.append(parse_qs(urlparse(url).query)["filter.query"][0])
+            return 200, _tag("urn:tag:category:place:bar", "Bar")
+        return 200, b'{"results":{"entities":[]}}'
+
+    LiveProvider(settings, fetch).write_report(
+        BusinessProfile(idea="bar", region="Austin"),
+        "I want to open a bar",
+        [
+            GrillTurn(question_id="when", question="When do you want to open?", answer="Within 6 months"),
+            GrillTurn(question_id="who", question="Who is it for?", answer="Young professionals"),
+        ],
     )
-    yoga = _search_phrases(
-        BusinessProfile(idea="yoga studio"),
-        "I want to open a yoga studio in Austin",
-    )
-    books = _search_phrases(
-        BusinessProfile(idea="used bookstore"),
-        "I want a used bookstore in Portland",
-    )
-    tea = _search_phrases(BusinessProfile(idea="tea shop"), "I want a tea shop")
-    gym = _search_phrases(BusinessProfile(idea="gym"), "I want to open a gym")
-    bar = _search_phrases(BusinessProfile(idea="bar"), "I want to open a bar")
-    assert chocolate[0] == "chocolate"
-    assert "yoga" in yoga
-    assert books[0] == "bookstore"
-    assert tea == ["tea"]
-    assert gym == ["gym"]
-    assert bar == ["bar"]
-    assert "local business" not in tea + gym + bar
-    canned = {"coffee shop", "chocolate shop", "grocery store", "candy store"}
-    assert canned.isdisjoint(yoga)
-    assert canned.isdisjoint(books)
+    assert queries == ["bar"]
+    assert "bar" in asked["user"]
+    assert "Within 6 months" in asked["user"]
+    assert "Young professionals" in asked["user"]
 
 
 def test_roofing_business_prefers_the_contractor():
-    from app.providers.live import _best_tag
+    settings = _settings()
+    calls = []
 
-    tag = _best_tag(
-        [
-            (
-                "roofing",
-                [
-                    {
-                        "id": "urn:tag:category:place:roofing_supply_store",
-                        "name": "Roofing supply store",
-                        "type": "urn:tag:category:place",
-                    },
-                    {
-                        "id": "urn:tag:category:place:roofing_contractor",
-                        "name": "Roofing contractor",
-                        "type": "urn:tag:category:place",
-                    },
-                ],
+    def fetch(method, url, headers, body, timeout):
+        if method != "GET":
+            return _answer_model(
+                body,
+                category="roofing contractor",
+                pick_id="urn:tag:category:place:roofing_contractor",
             )
-        ]
+        calls.append(url)
+        if "/v2/tags" in url:
+            return 200, json.dumps(
+                {
+                    "results": {
+                        "tags": [
+                            {
+                                "id": "urn:tag:category:place:roofing_supply_store",
+                                "name": "Roofing supply store",
+                                "type": "urn:tag:category:place",
+                            },
+                            {
+                                "id": "urn:tag:category:place:roofing_contractor",
+                                "name": "Roofing contractor",
+                                "type": "urn:tag:category:place",
+                            },
+                        ]
+                    }
+                }
+            ).encode()
+        return 200, b'{"results":{"entities":[]}}'
+
+    LiveProvider(settings, fetch).write_report(
+        BusinessProfile(idea="roofing business", region="Denver"),
+        "I want to start a roofing business in Denver.",
+        [],
     )
-    assert tag is not None
-    assert tag["id"] == "urn:tag:category:place:roofing_contractor"
+    insights = [url for url in calls if "/v2/insights" in url]
+    assert len(insights) == 1
+    assert parse_qs(urlparse(insights[0]).query)["filter.tags"] == [
+        "urn:tag:category:place:roofing_contractor"
+    ]
+    assert [parse_qs(urlparse(url).query)["filter.query"][0] for url in calls if "/v2/tags" in url] == [
+        "roofing contractor"
+    ]
 
 
 def test_far_places_are_left_out_of_a_city_brief():
@@ -249,7 +260,7 @@ def test_far_places_are_left_out_of_a_city_brief():
 
     def fetch(method, url, headers, body, timeout):
         if method != "GET":
-            return _brief()
+            return _answer_model(body)
         calls.append(url)
         query = parse_qs(urlparse(url).query)
         if "/v2/tags" in url:
@@ -337,7 +348,7 @@ def test_new_york_city_keeps_nearby_places_and_drops_far_ones():
 
     def fetch(method, url, headers, body, timeout):
         if method != "GET":
-            return _brief()
+            return _answer_model(body)
         calls.append((url, timeout))
         if "/v2/tags" in url:
             return 200, _grocery_tags()
@@ -411,7 +422,7 @@ def test_state_resolution_keeps_places_far_from_the_centroid():
 
     def fetch(method, url, headers, body, timeout):
         if method != "GET":
-            return _brief()
+            return _answer_model(body)
         assert timeout == 17
         if "/v2/tags" in url:
             return 200, _grocery_tags()
@@ -433,6 +444,8 @@ def test_tag_lookup_errors_are_not_empty_place_lists():
         def fetch(method, url, headers, body, timeout):
             if "/v2/tags" in url:
                 return status, b"{}"
+            if method != "GET":
+                return _answer_model(body)
             return _brief()
 
         return fetch
@@ -454,35 +467,118 @@ def test_tag_lookup_errors_are_not_empty_place_lists():
         raise AssertionError(status)
 
 
-def test_chocolate_shop_prefers_the_shop_category():
-    from app.providers.live import _best_tag
+def test_a_failed_category_lookup_is_not_an_empty_affinity_list(caplog):
+    settings = _settings()
 
-    tag = _best_tag(
-        [
-            (
-                "chocolate",
-                [
-                    {
-                        "id": "urn:tag:category:place:chocolate",
-                        "name": "Chocolate",
-                        "type": "urn:tag:category:place",
-                    },
-                    {
-                        "id": "urn:tag:category:place:chocolate_shop",
-                        "name": "Chocolate shop",
-                        "type": "urn:tag:category:place",
-                    },
-                    {
-                        "id": "urn:tag:category:place:chocolate_manufacturer",
-                        "name": "Chocolate manufacturer",
-                        "type": "urn:tag:category:place",
-                    },
-                ],
-            )
-        ]
+    def fetch(method, url, headers, body, timeout):
+        if "/v2/tags" in url:
+            return 500, b"upstream blew up"
+        if method != "GET":
+            return _answer_model(body)
+        raise AssertionError(url)
+
+    report = LiveProvider(settings, fetch).write_report(
+        BusinessProfile(idea="grocery shop", region="New York"),
+        "I want to start a grocery shop in New York.",
+        [],
     )
-    assert tag is not None
-    assert tag["id"] == "urn:tag:category:place:chocolate_shop"
+    taste = next(section.body for section in report.sections if section.heading == "What similar places suggest")
+    assert "category lookup failed" in taste
+    assert "no place affinities" not in taste
+    assert "qloo /v2/tags returned 500" in caplog.text
+    assert "upstream blew up" in caplog.text
+
+
+def test_a_failed_place_request_is_not_an_empty_affinity_list(caplog):
+    settings = _settings()
+
+    def fetch(method, url, headers, body, timeout):
+        if "/v2/insights" in url:
+            return 500, b"insights down"
+        if "/v2/tags" in url:
+            return 200, _grocery_tags()
+        return _answer_model(body)
+
+    report = LiveProvider(settings, fetch).write_report(
+        BusinessProfile(idea="grocery shop", region="New York"),
+        "I want to start a grocery shop in New York.",
+        [],
+    )
+    taste = next(section.body for section in report.sections if section.heading == "What similar places suggest")
+    assert "place request failed" in taste
+    assert "no place affinities" not in taste
+    assert "qloo /v2/insights returned 500" in caplog.text
+
+
+def test_a_tag_payload_without_tags_is_not_an_empty_affinity_list():
+    settings = _settings()
+    calls = []
+
+    def fetch(method, url, headers, body, timeout):
+        if method != "GET":
+            return _answer_model(body)
+        calls.append(url)
+        return 200, b'{"ok": true}'
+
+    report = LiveProvider(settings, fetch).write_report(
+        BusinessProfile(idea="grocery shop", region="New York"),
+        "I want to start a grocery shop in New York.",
+        [],
+    )
+    assert not any("/v2/insights" in url for url in calls)
+    taste = next(section.body for section in report.sections if section.heading == "What similar places suggest")
+    assert "no place category" in taste
+    assert "no place affinities" not in taste
+
+
+def test_chocolate_shop_prefers_the_shop_category():
+    settings = _settings()
+    calls = []
+
+    def fetch(method, url, headers, body, timeout):
+        if method != "GET":
+            return _answer_model(
+                body,
+                category="chocolate shop",
+                pick_id="urn:tag:category:place:chocolate_shop",
+            )
+        calls.append(url)
+        if "/v2/tags" in url:
+            return 200, json.dumps(
+                {
+                    "results": {
+                        "tags": [
+                            {
+                                "id": "urn:tag:category:place:chocolate",
+                                "name": "Chocolate",
+                                "type": "urn:tag:category:place",
+                            },
+                            {
+                                "id": "urn:tag:category:place:chocolate_shop",
+                                "name": "Chocolate shop",
+                                "type": "urn:tag:category:place",
+                            },
+                            {
+                                "id": "urn:tag:category:place:chocolate_manufacturer",
+                                "name": "Chocolate manufacturer",
+                                "type": "urn:tag:category:place",
+                            },
+                        ]
+                    }
+                }
+            ).encode()
+        return 200, b'{"results":{"entities":[]}}'
+
+    LiveProvider(settings, fetch).write_report(
+        BusinessProfile(idea="chocolate shop", region="Portland"),
+        "I want a chocolate shop in Portland.",
+        [],
+    )
+    insights = [url for url in calls if "/v2/insights" in url]
+    assert len(insights) == 1
+    assert parse_qs(urlparse(insights[0]).query)["filter.tags"] == [
+        "urn:tag:category:place:chocolate_shop"
+    ]
 
 
 def test_empty_local_results_stay_in_the_region():
@@ -491,7 +587,11 @@ def test_empty_local_results_stay_in_the_region():
 
     def fetch(method, url, headers, body, timeout):
         if method != "GET":
-            return _brief()
+            return _answer_model(
+                body,
+                category="chocolate shop",
+                pick_id="urn:tag:category:place:chocolate_shop",
+            )
         calls.append(url)
         if "/v2/tags" in url:
             return 200, json.dumps(
@@ -536,11 +636,13 @@ def test_empty_local_results_stay_in_the_region():
         [],
     )
     insights = [url for url in calls if "/v2/insights" in url]
-    assert insights
-    for url in insights:
-        assert parse_qs(urlparse(url).query)["filter.location.query"] == ["New Hampshire"]
+    assert len(insights) == 1
+    query = parse_qs(urlparse(insights[0]).query)
+    assert query["filter.location.query"] == ["New Hampshire"]
+    assert query["filter.tags"] == ["urn:tag:category:place:chocolate_shop"]
     taste = next(section.body for section in report.sections if section.heading == "What similar places suggest")
-    assert "Granite State Candy Shoppe" in taste
+    assert "no place affinities" in taste
+    assert "Granite State Candy Shoppe" not in taste
 
 
 def test_uncertain_tag_does_not_call_insights():
@@ -549,7 +651,7 @@ def test_uncertain_tag_does_not_call_insights():
 
     def fetch(method, url, headers, body, timeout):
         if method != "GET":
-            return _brief()
+            return _answer_model(body)
         calls.append(url)
         return 200, json.dumps(
             {
@@ -568,7 +670,7 @@ def test_uncertain_tag_does_not_call_insights():
     )
     assert not any("/v2/insights" in url for url in calls)
     taste = next(section.body for section in report.sections if section.heading == "What similar places suggest")
-    assert "no place affinities" in taste
+    assert "no place category" in taste
 
 
 def test_genre_tag_is_not_a_place_category_filter():
@@ -577,7 +679,7 @@ def test_genre_tag_is_not_a_place_category_filter():
 
     def fetch(method, url, headers, body, timeout):
         if method != "GET":
-            return _brief()
+            return _answer_model(body)
         calls.append(url)
         if "/v2/tags" in url:
             return 200, json.dumps(
@@ -631,42 +733,68 @@ def test_interest_signal_request_is_rejected():
         raise AssertionError(params)
 
 
-def test_cafe_tag_matches_a_coffee_shop():
-    from app.providers.live import _best_tag
+def test_a_single_place_category_is_used_as_given():
+    settings = _settings()
+    calls = []
+    prompts = []
 
-    tag = _best_tag(
-        [
-            (
-                "coffee shop",
-                [
-                    {
-                        "id": "urn:tag:category:place:cafe",
-                        "name": "Cafe",
-                        "type": "urn:tag:category:place",
+    def fetch(method, url, headers, body, timeout):
+        if method != "GET":
+            prompts.append(json.loads(body)["messages"][0]["content"])
+            return _answer_model(body, category="coffee shop")
+        calls.append(url)
+        if "/v2/tags" in url:
+            return 200, _tag("urn:tag:category:place:cafe", "Cafe")
+        return 200, b'{"results":{"entities":[]}}'
+
+    LiveProvider(settings, fetch).write_report(
+        BusinessProfile(idea="coffee shop", region="Austin"),
+        "I want to open a coffee shop in Austin.",
+        [],
+    )
+    insights = next(url for url in calls if "/v2/insights" in url)
+    assert parse_qs(urlparse(insights).query)["filter.tags"] == ["urn:tag:category:place:cafe"]
+    assert not any(prompt.startswith("Pick one Qloo") for prompt in prompts)
+
+
+def test_an_unknown_tag_id_is_not_sent_to_insights():
+    settings = _settings()
+    calls = []
+
+    def fetch(method, url, headers, body, timeout):
+        if method != "GET":
+            return _answer_model(body, category="bar", pick_id="urn:tag:category:place:not_a_real_tag")
+        calls.append(url)
+        if "/v2/tags" in url:
+            return 200, json.dumps(
+                {
+                    "results": {
+                        "tags": [
+                            {
+                                "id": "urn:tag:category:place:bar",
+                                "name": "Bar",
+                                "type": "urn:tag:category:place",
+                            },
+                            {
+                                "id": "urn:tag:category:place:barber_shop",
+                                "name": "Barber shop",
+                                "type": "urn:tag:category:place",
+                            },
+                        ]
                     }
-                ],
-            )
-        ]
+                }
+            ).encode()
+        return 200, b'{"results":{"entities":[]}}'
+
+    report = LiveProvider(settings, fetch).write_report(
+        BusinessProfile(idea="bar", region="Austin"),
+        "I want to open a bar in Austin.",
+        [],
     )
-    assert tag is not None
-    assert tag["id"] == "urn:tag:category:place:cafe"
-
-
-def test_uncertain_place_tag_is_not_sent_to_qloo():
-    from app.providers.live import _best_tag
-
-    tag = _best_tag(
-        [
-            (
-                "grocery store",
-                [
-                    {"id": "urn:tag:genre:place:bookstore", "name": "Bookstore", "type": "urn:tag:genre:place"},
-                    {"id": "urn:tag:genre:media:comedy", "name": "Comedy", "type": "urn:tag:genre:media"},
-                ],
-            )
-        ]
-    )
-    assert tag is None
+    assert not any("/v2/insights" in url for url in calls)
+    taste = next(section.body for section in report.sections if section.heading == "What similar places suggest")
+    assert "did not" in taste.lower() or "none of qloo" in taste.lower()
+    assert "no place affinities" not in taste
 
 
 def test_questions_change_with_the_business_idea():
@@ -719,6 +847,41 @@ def _settings() -> Settings:
     settings.llm_model = "gpt-6-luna"
     settings.llm_base_url = ""
     return settings
+
+
+def _tag(tag_id: str, name: str) -> bytes:
+    return json.dumps(
+        {
+            "results": {
+                "tags": [
+                    {"id": tag_id, "name": name, "type": "urn:tag:category:place"},
+                ]
+            }
+        }
+    ).encode()
+
+
+def _model(content: dict):
+    return 200, json.dumps(
+        {"choices": [{"message": {"content": json.dumps(content)}}]}
+    ).encode()
+
+
+def _answer_model(
+    body: bytes,
+    category: str = "grocery store",
+    pick_id: str = "",
+    place_note: str = "",
+):
+    payload = json.loads(body)
+    system = payload["messages"][0]["content"]
+    if "place-category search phrase" in system:
+        return _model({"category": category})
+    if "Pick one Qloo place-category" in system:
+        return _model({"id": pick_id})
+    if "Turn Qloo place results" in system and place_note:
+        return _model({"body": place_note})
+    return _brief()
 
 
 def _grocery_tags() -> bytes:

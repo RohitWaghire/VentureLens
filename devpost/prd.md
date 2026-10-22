@@ -14,7 +14,7 @@ Source: `scope.md > The Unique Kernel` and `scope.md > The Core Loop`.
 3. They move through that round one question at a time. Earlier questions and answers are not replayed on the screen.
 4. When the round is finished, they confirm that the collected answers match what they meant. The brief is not written until they confirm.
 5. They see one brief: a title, a short summary, the sections the model wrote, and the answers that were collected. They can download that same brief as Markdown, or start a new idea, which discards the session.
-6. Success, for the proof of concept, is that coffee-shop walk-through completing on screen without an account. With the demo provider, no API key is required. With the live provider configured, the brief may also name places Qloo returned for that idea and city.
+6. Success, for the proof of concept, is that coffee-shop walk-through completing on screen without an account. The brief names places when Qloo returns them for that idea and city. Tests use a fake transport and need no keys.
 
 Source: `scope.md > The Core Loop` and `scope.md > What "Working" Looks Like`.
 
@@ -58,12 +58,12 @@ No accounts and no saved history. The session lives in memory, expires on the se
 
 - Adaptive grilling instead of a fixed form — the discovery dialogue rejected a questionnaire that re-asks known details.
 - A written brief with Markdown download, not a numeric score — the build dialogue removed the scorecard.
-- Demo path with no keys, and an optional live Qloo and model provider behind the same screens — so the proof of concept runs for a reviewer without credentials.
+- Live Qloo and the model on these screens, with tests that inject a fake transport — a reviewer of the code needs no credentials, and a running demo does.
 - One question on screen at a time — the build dialogue removed the grilling history.
 - Glass cards on the landscape — the design dialogue, after the discovery plan's simpler shell.
 
 ## What We're Building
-The journey above, on the four screens, with the demo provider working with no secrets, tests that do not call live APIs, and the optional live provider left behind the same flow.
+The journey above, on the four screens. Tests do not call live APIs.
 
 ## Deferred From the POC
 Ranked cities, neighborhood shortlists, inline citations on web research, and a follow-up chat that must not change the downloaded brief. The discovery dialogue specified them. They are not required to prove the kernel that shipped.

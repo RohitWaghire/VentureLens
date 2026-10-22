@@ -78,7 +78,12 @@ def scripted_fetch(method, url, headers, body, timeout):
     payload = json.loads(body)
     system = payload["messages"][0]["content"]
     user = json.loads(payload["messages"][-1]["content"])
-    if "grilling a founder" in system:
+    if "place-category search phrase" in system:
+        content = {"category": user.get("idea") or "local place"}
+    elif "Pick one Qloo place-category" in system:
+        tags = user.get("tags") or []
+        content = {"id": tags[0]["id"] if tags else ""}
+    elif "grilling a founder" in system:
         asked = user.get("answered") or []
         if len(asked) >= len(_QUESTIONS):
             content = {"questions": []}

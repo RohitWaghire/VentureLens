@@ -68,7 +68,8 @@ commit a real secret. Key knobs:
   routes (`/`, `/start`, `/grill`, `/report`, `/report/download`, `/new`,
   `/close`).
 - **`app/providers/`** — the live provider. The model asks the next question.
-  `write_report` asks Qloo for places and the model for the brief.
+  `write_report` asks the model to name a place category, asks Qloo for places
+  of that category, then asks the model to write the brief.
 - **`app/sessions.py`** / **`app/security.py`** — session store, rate limiting,
   budgets, CSRF/origin and IP handling.
 - **`app/model.py`** — pydantic models for the profile, grilling questions,

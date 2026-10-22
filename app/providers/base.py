@@ -1,8 +1,8 @@
 """Provider interface.
 
 Callers learn three methods. ``extract_opening`` reads the opening prompt.
-``question`` is the next grilling question. ``write_report`` asks Qloo for
-places and the model for the brief.
+``question`` is the next grilling question. ``write_report`` asks the model to name a place category, Qloo for
+places of that category, and the model again for the brief.
 
 A live call raises ``ProviderError`` with a message that is safe to show.
 The message never includes credentials or response bodies.

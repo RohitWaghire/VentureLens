@@ -1,46 +1,45 @@
-# ADR-0001 — Provider and scoring architecture
+# ADR-0001 — Provider architecture
 
-**Status:** Accepted (Phase 0 of `PROJECT_PLAN.md`)
-**Date:** 2026-10-05
+**Status:** Accepted, revised
+**Date:** 2026-10-05, revised 2026-10-22
 
 ## Context
 
-VentureLens needs three external capabilities — a language model for the
-interview/synthesis, public web research with citations, and Qloo for
-audience/cultural signals — plus a repeatable way to compare neighborhoods. The
-hackathon plan explicitly defers concrete provider selection to Phase 0 based on
-available credentials, terms, and cost. The MVP must be runnable and testable
-with no credentials.
+VentureLens needs a language model for the interview and the brief, and Qloo
+for aggregate place affinities. An earlier draft of this note described a
+credential-free demo provider, a `VL_PROVIDER` switch, and a scoring module.
+None of those are in the app.
 
 ## Decision
 
-1. **Provider seam.** The app depends only on `app.providers.base.Provider`.
-   A deterministic, credential-free `DemoProvider` is the default and is fully
-   testable. Real LLM/search/Qloo adapters implement the same interface and are
-   registered behind the `VL_PROVIDER` env var. Qloo is called directly from
-   the server; the CLI/MCP runtime is not a dependency.
-2. **Agent control flow** is a small, explicit, linear orchestration loop
-   (inspired by mini-SWE-agent's simplicity, not its shell tooling). Interview
-   sequencing is application state code, not opaque model behavior.
-3. **Scoring stays in application code.** Fixed, documented category weights
-   (cafés and restaurants), the weighted-total arithmetic, and the comparison
-   ordering rule live in `app/scoring.py`, never in the model. The model
-   provides versioned 1–5 factor ratings from cited evidence.
-4. **Withhold incomplete totals.** If any factor is unscored, the overall
-   numeric fit is withheld (never estimated). Incomplete rows are ordered by
-   evidence completeness, then by a labeled heuristic comparison score.
+1. **One provider.** The app depends on `app.providers.base.Provider`.
+   `LiveProvider` is the only adapter. Tests inject an HTTP transport and do
+   not call live APIs. There is no demo provider and no shared question list.
+2. **The model mediates Qloo.** Luna reads the opening prompt and the
+   transcript and names one place category. The app searches Qloo tags for
+   that phrase and keeps ids that start with `urn:tag:category:place:`. When
+   several match, Luna picks among the tags Qloo returned. An id Luna invents
+   is not sent. Insights then uses that tag and the named city. Luna writes
+   the brief and the short place note from what came back.
+3. **Place rules stay in code.** Insights require a place-category tag. An
+   interest signal is rejected. A named city stays on the request. An empty
+   city does not become a worldwide search. A statewide retry keeps only
+   places near that city.
+4. **A failed Qloo call is not an empty affinity list.** A category-lookup
+   failure, a place-request failure, a missing category, and a real empty
+   list are different sentences in the brief. The status code and a short
+   piece of a non-200 body are logged. The log and the page never include
+   the key.
 
 ## Consequences
 
-- The app runs and all tests pass without credentials or network access.
-- Real providers and credentials slot in without touching app logic.
-- Score meaning is stable and auditable (anchor version `1.0`).
-- Research costs are bounded by per-session and global budgets enforced at the
-  provider call site.
+- Tests pass without credentials or network access.
+- The category is the model's reading of this idea, not a word-overlap score.
+- Qloo errors and empty results no longer share one sentence.
 
 ## Alternatives considered
 
-- Bundling real provider SDKs into the MVP core: rejected — no credentials
-  available for verification, and it couples the app to chosen vendors.
-- Letting the model compute weighted totals directly: rejected — non-repeatable
-  and conflicts with the inspected, deterministic scoring requirement.
+- Ranking Qloo tags in Python by word overlap: rejected. It treated answer
+  words as searches and could rank a barber shop above a bar.
+- Letting the model invent a tag id: rejected. Insights only accepts a tag
+  Qloo returned.
