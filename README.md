@@ -8,8 +8,7 @@ shortlisted answer options, and the model writes a report that is presented to
 the user (and can be downloaded as Markdown).
 
 > **Status:** Hackathon MVP. Grilling questions come from the configured model,
-> one at a time. The brief uses those answers and Qloo places. Both keys are
-> required.
+> one at a time. The brief uses those answers and Qloo places. Both keys are required.
 
 ## Key behaviors
 
